@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Iterable, Optional, Type
 from enum import StrEnum
-import copy, json
+import copy, json, datetime
 
 class listofdicts(List[Dict[str, Any]]):
     """
@@ -336,26 +336,58 @@ class listofdicts(List[Dict[str, Any]]):
         If preserve_metadata is False, only the core iterator data will be returned, as a list of dictionaries, unnested.         
         """
         if preserve_metadata:
-            metadata = {
-                "metadata": self.metadata,
-                "schema": self.schema,
+            adj_schema = {n:str(v).split("'")[1] for n,v in self.schema.items()}
+            settings = {
+                "schema": adj_schema,
                 "schema_add_missing": self.schema_add_missing,
                 "schema_constrain_to_existing": self.schema_constrain_to_existing,
                 "immutable": self.immutable
             }
-            return json.dumps({"metadata": metadata, "data": list(self)}, indent=indent)
+            return json.dumps({"metadata": self.metadata, "data": list(self), "settings": settings}, indent=indent)
 
         return json.dumps(list(self), indent=indent)
 
     @classmethod
-    def from_json(cls, json_str: str, *, schema: Optional[Dict[str, Type]] = None, schema_add_missing: bool = False, schema_constrain_to_existing: bool = False, immutable: bool = False) -> 'listofdicts':
+    def from_json(cls, json_str: str, *, metadata: Optional[Dict[str, Any]] = None, schema: Optional[Dict[str, Type]] = None, schema_add_missing: bool = False, schema_constrain_to_existing: bool = False, immutable: bool = False) -> 'listofdicts':
         """
         Creates a listofdicts instance from a JSON string.
         """
+        if type(json_str) in(list,dict): json_str = json.dumps(json_str)
         data = json.loads(json_str)
-        if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
-            raise ValueError("JSON must represent a list of dicts.")
-        return cls(data, immutable=immutable, schema=schema, schema_add_missing=schema_add_missing, schema_constrain_to_existing=schema_constrain_to_existing)
+        if isinstance(data, list): # no metadata, just data
+            return cls(data, metadata=metadata, immutable=immutable, schema=schema, schema_add_missing=schema_add_missing, schema_constrain_to_existing=schema_constrain_to_existing)
+        if isinstance(data, dict) and "data" in data and isinstance(data["data"], list): # data element is required
+            if 'metadata' not in data: data['metadata'] = {}  # metadata is optional
+            if 'settings' not in data: data['settings'] = {}  # settings are optional
+            if 'schema' in data['settings'] and isinstance(data['settings']['schema'], dict): 
+                # convert schema values (as strings) back into native python types
+                for sname, svalue in data['settings']['schema'].items(): 
+                    match svalue.strip(): # safer than eval, which can execute arbitrary code
+                        case "str": data['settings']['schema'][sname] = str
+                        case "int": data['settings']['schema'][sname] = int
+                        case "float": data['settings']['schema'][sname] = float
+                        case "bool": data['settings']['schema'][sname] = bool
+                        case "date": data['settings']['schema'][sname] = datetime.date
+                        case "datetime": data['settings']['schema'][sname] = datetime.datetime
+                        case "timedelta": data['settings']['schema'][sname] = datetime.timedelta
+                        case "time": data['settings']['schema'][sname] = datetime.time
+                        case "list": data['settings']['schema'][sname] = list
+                        case "dict": data['settings']['schema'][sname] = dict
+                        case "set": data['settings']['schema'][sname] = set
+                        case "tuple": data['settings']['schema'][sname] = tuple
+                        case "bytearray": data['settings']['schema'][sname] = bytearray
+                        case "bytes": data['settings']['schema'][sname] = bytes
+                        case "range": data['settings']['schema'][sname] = range
+                        case "listofdicts": data['settings']['schema'][sname] = listofdicts
+                        case _: data['settings']['schema'][sname] = object
+            return cls(data["data"], 
+                       metadata=data["metadata"],
+                       immutable=data["settings"].get("immutable", immutable), 
+                       schema=data['settings'].get('schema', schema),
+                       schema_add_missing=data['settings'].get('schema_add_missing', schema_add_missing),
+                       schema_constrain_to_existing=data['settings'].get('schema_constrain_to_existing', schema_constrain_to_existing)
+            )
+        raise ValueError("JSON must represent a list of dicts [{},{},...], or a dictionary with {'metadata': {...}, 'data': [{},{},...], an optionally 'settings': {...}} keys.")
 
     @classmethod
     def as_llm_prompt(cls, system_prompts, user_prompts, schema:dict = {'role': str, 'content': str}, *prompt_modes ) -> 'listofdicts':
@@ -392,4 +424,23 @@ class PROMPT_MODES(StrEnum):
     CREATIVE_WRITER = "Where appropriate, weave metaphor, emotion, or narrative structure into the response to enhance engagement."
 
  
+
+if __name__ == "__main__":
+
+    # from_json (preserve_metadata=True)
+    schema = {'dog': str}
+    data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
+    metadata = {'key1':1, 'key2':2}
+
+    lod = listofdicts.from_json(data, metadata=metadata, schema=schema)
+    json_doc = lod.to_json(preserve_metadata=True)
+
+    lod = listofdicts.from_json(json_doc)
+    assert lod.schema == schema
+    assert lod.metadata == metadata
+    assert list(lod) == data
+    
+
+    # load directly from file:
+    assert 'metadata' in lod.to_json(preserve_metadata=True)
 

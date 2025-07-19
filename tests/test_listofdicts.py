@@ -1,5 +1,5 @@
 from listofdicts import listofdicts
-import pytest, random
+import pytest, random, json
 
 def test_can_initialize():
     obj = listofdicts([{"key": "value"}])
@@ -151,5 +151,35 @@ def test_usage():
     assert lod.metadata == md
     assert len(lod) == 0
 
+    # from_json ()
+    data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
+    json_doc = json.dumps(data)
 
+    lod = listofdicts.from_json(json_doc)
+    assert len(lod) == 5
+    assert lod[0]['dog'] == "sunny"
+    assert lod[1]['dog'] == "luna"
+    assert lod[2]['dog'] == "stella"
+    assert lod[3]['dog'] == "fido"
+    assert lod[4]['dog'] == "rex"
 
+    # from_json (preserve_metadata=True)
+    schema = {'dog': str}
+    data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
+    metadata = {'key1':1, 'key2':2}
+
+    lod = listofdicts.from_json(data, metadata=metadata, schema=schema, immutable=True)
+    assert lod.schema == schema
+    assert lod.metadata == metadata
+    assert list(lod) == data
+    assert lod.immutable == True
+    
+    full_json_doc = lod.to_json(preserve_metadata=True)
+    assert type(full_json_doc) == str
+    lod = None 
+    lod = listofdicts.from_json(full_json_doc)
+    assert lod.schema == schema
+    assert lod.metadata == metadata
+    assert list(lod) == data
+    assert lod.schema['dog'] == str
+    assert lod.immutable == True
