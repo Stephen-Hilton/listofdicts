@@ -15,13 +15,15 @@ class listofdicts(List[Dict[str, Any]]):
         schema: Optional[Dict[str, Type]] = None,
         schema_add_missing: bool = False,
         schema_constrain_to_existing: bool = False,
-        immutable: bool = False
+        immutable: bool = False,
+        metadata: Optional[Dict[str, Any]] = None
     ):
 
         self.immutable = immutable
         self._schm = schema
         self._schmaddmiss = schema_add_missing
         self._shmcnst2xst = schema_constrain_to_existing
+        self._metadata = metadata if metadata else {}
 
         if iterable is None:
             super().__init__()

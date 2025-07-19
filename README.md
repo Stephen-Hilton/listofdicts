@@ -61,7 +61,7 @@ lod.metadata = {"data_source":"some.test.location",
                 "load_errors":1,
                 "errors":[te]}
 
-# iterate or enumerate core data (without metadata
+# iterate or enumerate core data (without metadata)
 for person in lod:
     print(f" The person named {person['name']} is {person['age'] or 'unknown'} years old.")
 

@@ -145,3 +145,11 @@ def test_usage():
             assert d[keyname] >= prev # current should always he larger or equal to previous
             prev = d[keyname]
 
+    # new lod with metadata set at instantiation time:
+    md = {'key1':1, 'key2':2}
+    lod = listofdicts(metadata=md)
+    assert lod.metadata == md
+    assert len(lod) == 0
+
+
+
