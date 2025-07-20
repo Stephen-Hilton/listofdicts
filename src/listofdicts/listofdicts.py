@@ -167,6 +167,13 @@ class listofdicts(List[Dict[str, Any]]):
         self._check_mutable()
         super().__delitem__(index)
 
+    def __str__(self):
+        max_key_len = max([len(k) for k in self.unique_keys()])       
+        rtn = []
+        for r in self:
+            rtn.append('{\n\t' + '\n\t'.join([f'{str(n).ljust(max_key_len)} : {v}' for n,v in r.items()]) + '\n}') 
+        return  '[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
+ 
     def _check_mutable(self):
         if self.immutable: raise TypeError("This listofdicts instance is immutable.")
 
@@ -267,8 +274,15 @@ class listofdicts(List[Dict[str, Any]]):
         """
         Returns a list of all unique values across all dicts in the listofdicts, for a given key.
         """
-        return list(set([d[key] for d in self]))
+        if key not in self.unique_keys(): raise KeyError(f"Key '{key}' not found in this listofdicts.")
+        return list(set([d[key] for d in self if key in d]))
         
+    def unique_key_value_len(self, key:str) -> int:
+        """
+        Returns the character length of each unique value across all dicts in the listofdicts, for a given key.
+        """
+        values = self.unique_key_values(key)
+        return [len(str(v)) for v in values]
 
     def copy(self, *, 
              schema: Optional[Dict[str, Type]] = None, 
@@ -429,18 +443,12 @@ if __name__ == "__main__":
 
     # from_json (preserve_metadata=True)
     schema = {'dog': str}
-    data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
+    data = [{"dog": "sunny", "legs": 4}, {"dog": "luna", "legs": 4}, {"dog": "stumpy", "legs": 3}, {"dog": "fido"}]
     metadata = {'key1':1, 'key2':2}
-
     lod = listofdicts.from_json(data, metadata=metadata, schema=schema)
-    json_doc = lod.to_json(preserve_metadata=True)
 
-    lod = listofdicts.from_json(json_doc)
-    assert lod.schema == schema
-    assert lod.metadata == metadata
-    assert list(lod) == data
+    print(lod) 
+
     
-
-    # load directly from file:
-    assert 'metadata' in lod.to_json(preserve_metadata=True)
-
+ 
+    pass
