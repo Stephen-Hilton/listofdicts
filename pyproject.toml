@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "listofdicts"
-version = "1.1.4"
+version = "1.1.6"
 description = "A strongly typed list of dictionaries data type with validation and serialization support."
 authors = [{ name="Stephen Hilton", email="stephen@familyhilton.com" }]
 readme = "README.md"
@@ -12,7 +12,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.8"
 keywords = ["list","dict","list of dict","listofdict","listofdicts"]
-dependencies = []
+dependencies = ['pydantic']
 
 
 [tool.setuptools]

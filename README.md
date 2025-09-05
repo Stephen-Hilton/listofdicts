@@ -14,7 +14,8 @@ This class is ideal for applications that require structured tabular-like data m
 
 ## 🚀 Features
 
-- 🔒 **Immutability**: Optional protection against in-place changes
+- 🔒 **Immutability**: Optional full immutability, at both list and dict level
+- 🔒 **Append_only**: Optional append-only protection, at both list and dict level
 - ✅ **Schema validation**:
   - `schema_constrain_to_existing`: restrict keys to the schema
   - `schema_add_missing`: auto-insert missing schema keys as `None`
@@ -80,6 +81,8 @@ print(lod.to_json(indent=2, preserve_metadata=True))
 |--------|-------------|
 | `append` | Append a dictionary to the end of this listofdicts object. This will fail if the object has been made immutable, or if the schema was defined and enforced, and the new dictionary keys do not match the schema. |
 | `as_immutable` | Returns an immutable deepcopy of this listofdicts instance. |
+| `as_append_only` | Returns an append_only deepcopy of this listofdicts instance. |
+| `as_mutable` | Returns a fully mutable deepcopy of this listofdicts instance. |
 | `as_llm_prompt` | Creates a listofdicts instance, customized for LLM prompts. |
 | `as_mutable` | Returns a mutable deepcopy of this listofdicts instance. |
 | `clear` | Clear the listofdicts object (in place). This will fail if this object has been made immutable. |

@@ -1,6 +1,21 @@
+import copy, json, datetime
 from typing import List, Dict, Any, Iterable, Optional, Type
 from enum import StrEnum
-import copy, json, datetime
+from pydantic_core import core_schema
+from typing import Any
+
+
+
+
+class ImmutableDict(Dict):
+    """An immutable dict subclass, which removes all ability to update the dict directly."""
+    def __setitem__(self, key, value): raise AttributeError("Cannot modify items in an immutable dictionary")
+    def __delitem__(self, key): raise AttributeError("Cannot delete items from an immutable dictionary")
+    def update(self, *args, **kwargs): raise AttributeError("Cannot update an immutable dictionary")        
+    def clear(self): raise AttributeError("Cannot clear an immutable dictionary")
+    def pop(self, *args, **kwargs): raise AttributeError("Cannot pop from an immutable dictionary")
+    def popitem(self):raise AttributeError("Cannot popitem from an immutable dictionary")
+
 
 class listofdicts(List[Dict[str, Any]]):
     """
@@ -16,10 +31,12 @@ class listofdicts(List[Dict[str, Any]]):
         schema_add_missing: bool = False,
         schema_constrain_to_existing: bool = False,
         immutable: bool = False,
+        append_only: bool = False,
         metadata: Optional[Dict[str, Any]] = None
     ):
 
         self.immutable = immutable
+        self.append_only = append_only
         self._schm = schema
         self._schmaddmiss = schema_add_missing
         self._shmcnst2xst = schema_constrain_to_existing
@@ -28,8 +45,7 @@ class listofdicts(List[Dict[str, Any]]):
         if iterable is None:
             super().__init__()
         else:
-            iterable = list(iterable)
-            self.validate_all(iterable)
+            iterable = self.validate_all(list(iterable))
             super().__init__(iterable)
 
 
@@ -123,21 +139,21 @@ class listofdicts(List[Dict[str, Any]]):
     def append(self, item: Dict[str, Any]) -> None:
         """
         Append a dictionary to the end of this listofdicts object. 
-        This will fail if the object has been made immutable, or
+        This will fail if the object has been made immutable (append_only is fine), or
         if the schema was defined and enforced, and the new dictionary keys do not match the schema.
         """
-        self._check_mutable()
-        self.validate_item(item)
+        self._check_mutable(appending=True)
+        item = self.validate_item(item)
         super().append(item)
 
     def extend(self, other: 'listofdicts') -> None:
         """
         Extend THIS listofdicts object (in place) with dictionaries from another listofdicts object (returning None).
-        This will fail if this object has been made immutable, or
+        This will fail if this object has been made immutable (append_only is fine), or
         if the schema was defined and enforced, and the new dictionary keys do not match the schema.
         """
-        self._check_mutable()
-        self.validate_all(other)
+        self._check_mutable(appending=True)
+        other = self.validate_all(other)
         super().extend(other)
         return self
 
@@ -155,16 +171,16 @@ class listofdicts(List[Dict[str, Any]]):
         raise TypeError("Only listofdicts or dict instances can be added with +=.")
      
     def __setitem__(self, index, value):
-        self._check_mutable()
+        self._check_mutable(appending=False)
         if isinstance(index, slice):
-            self.validate_all(value)
-            super().__setitem__(index, copy.deepcopy(value))
+            value = self.validate_all(copy.deepcopy(value))
+            super().__setitem__(index, value)
         else:
-            self.validate_item(value)
-            super().__setitem__(index, copy.deepcopy(value))
+            value = self.validate_item(copy.deepcopy(value))
+            super().__setitem__(index, value)
 
     def __delitem__(self, index):
-        self._check_mutable()
+        self._check_mutable(appending=False)
         super().__delitem__(index)
 
     def __str__(self):
@@ -174,10 +190,30 @@ class listofdicts(List[Dict[str, Any]]):
             rtn.append('{\n\t' + '\n\t'.join([f'{str(n).ljust(max_key_len)} : {v}' for n,v in r.items()]) + '\n}') 
         return  '[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
  
-    def _check_mutable(self):
-        if self.immutable: raise TypeError("This listofdicts instance is immutable.")
+    @classmethod # for pydantic support
+    def __get_pydantic_core_schema__(
+        cls, 
+        source_type: Any, 
+        handler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_after_validator_function(
+            cls._validate,
+            core_schema.list_schema(core_schema.dict_schema())
+        )
+    
+    @classmethod  # for pydantic support
+    def _validate(cls, value):
+        # Convert value into a listofdicts instance
+        if isinstance(value, cls): return value
+        if isinstance(value, dict): return cls([value])   
+        return cls(value)
 
-    def validate_all(self, iterable: Iterable[Dict[str, Any]] = None):
+
+    def _check_mutable(self, appending:bool = False):
+        if self.immutable: raise AttributeError("This listofdicts instance is immutable.")
+        if self.append_only and not appending: raise AttributeError("This listofdicts instance is append only, you cannot modify existing entries.")
+
+    def validate_all(self, iterable: Iterable[Dict[str, Any]] = None) -> list:
         """
         Validate all elements in the listofdicts object.
         This will fail if the schema was defined and enforced, and any dictionary keys do not match the schema.
@@ -185,17 +221,35 @@ class listofdicts(List[Dict[str, Any]]):
         """
         if iterable is None: iterable = self
         if not isinstance(iterable, list): raise TypeError("Requires a list or listofdicts type.")
-        if not all(isinstance(item, dict) for item in iterable): raise TypeError("All elements must be dicts.")
-        for item in iterable: self.validate_item(item)
+        for pos, item in enumerate(iterable): 
+            iterable[pos] = self.validate_item(item) # this does all checking / reporting
+        return iterable
 
-    def validate_item(self, new_item: Dict[str, Any]):
+    def make_dict_immutable(self, dict_item:dict):
+        """
+        Subclasses dict with ImmutableDict() object, making it immutable.  This is used automatically when 
+        setting the parent to either immutable or append_only, however you can use it on individual dicts 
+        while inserting, allowing you have a mixture of mutable and immutable data.  
+
+        Accepts a dict, and returns an ImmutableDict() with update functions disabled.
+        """
+        return ImmutableDict(dict_item) 
+    
+
+    def validate_item(self, new_item: Dict[str, Any]) -> dict:
         """
         Validate a single dictionary element in the listofdicts object.
         This will fail if the schema was defined and enforced, and any dictionary keys do not match the schema.
         This can be useful to ensure the new dict elements is valid, before inserting into the listofdicts object.
         """
         if not isinstance(new_item, dict): raise TypeError("Element must be a dictionary.")
-        if not self.schema: return
+        
+        # new_item should be ImmutableDict if the list is immutable or append_only, otherwise just a dict
+        if (self.append_only or self.immutable) and type(new_item) != ImmutableDict:  
+            new_item = self.make_dict_immutable(new_item)        
+
+        # everything else is schema validation:
+        if not self.schema: return new_item
 
         # deal with extra keys
         if self.schema_constrain_to_existing:
@@ -219,37 +273,40 @@ class listofdicts(List[Dict[str, Any]]):
             raise TypeError("New dictionary has mismatched types:\n  " + '\n  '.join(mismatched_types))
         else: 
             pass 
+        
+        return new_item
+
 
     def clear(self):
         """
         Clear the listofdicts object (in place).
-        This will fail if this object has been made immutable.
+        This will fail if this object has been made immutable or append_only.
         """
-        self._check_mutable()
+        self._check_mutable(appending=False)
         super().clear()
 
     def pop(self, index=-1):
         """
         Remove and return an element from the listofdicts object, at the given index (default last).
-        This will fail if this object has been made immutable.
+        This will fail if this object has been made immutable or append_only.
         """
-        self._check_mutable()
+        self._check_mutable(appending=False)
         return super().pop(index)
 
     def popitem(self):
         """
         Remove and return an element from the listofdicts object.
-        This will fail if this object has been made immutable.
+        This will fail if this object has been made immutable or append_only.
         """
-        self._check_mutable()
+        self._check_mutable(appending=False)
         return super().popitem()
     
     def remove(self, value):
         """
         Remove an element from the listofdicts object (in place), by value (aka dictionary).
-        This will fail if this object has been made immutable.
+        This will fail if this object has been made immutable or append_only.
         """
-        self._check_mutable()
+        self._check_mutable(appending=False)
         return super().remove(value)
         
 
@@ -288,21 +345,25 @@ class listofdicts(List[Dict[str, Any]]):
              schema: Optional[Dict[str, Type]] = None, 
              schema_add_missing: Optional[bool] = None, 
              schema_constrain_to_existing: Optional[bool] = None, 
-             immutable: Optional[bool] = None) -> 'listofdicts':
+             immutable: Optional[bool] = None,
+             append_only: Optional[bool] = None) -> 'listofdicts':
         """
         Performs a deep copy of the listofdicts instance, with optional schema and immutability overrides.
         """
-        return listofdicts(copy.deepcopy(self),
+        lod = [dict(d) for d in self]
+        return listofdicts(copy.deepcopy(lod),
                            schema=schema if schema is not None else self.schema, 
                            schema_add_missing=schema_add_missing if schema_add_missing is not None else self.schema_add_missing, 
                            schema_constrain_to_existing=schema_constrain_to_existing if schema_constrain_to_existing is not None else self.schema_constrain_to_existing,
-                           immutable=immutable if immutable is not None else self.immutable)
+                           immutable=immutable if immutable is not None else self.immutable,
+                           append_only=append_only if append_only is not None else self.append_only
+                           )
 
     def as_mutable(self) -> 'listofdicts':
         """
-        Returns a mutable deepcopy of this listofdicts instance.
+        Returns a mutable (not immutable nor append_only) deepcopy of this listofdicts instance.
         """
-        return self.copy(immutable=False)
+        return self.copy(immutable=False, append_only=False)
 
     def as_immutable(self) -> 'listofdicts':
         """
@@ -310,24 +371,30 @@ class listofdicts(List[Dict[str, Any]]):
         """
         return self.copy(immutable=True)
 
+    def as_append_only(self) -> 'listofdicts':
+        """
+        Returns an append_only deepcopy of this listofdicts instance.
+        """
+        return self.copy(append_only=True)
+
     def update_item(self, index: int, updates: Dict[str, Any]):
         """
         Updates the dictionary object of the list at the given index.  
+        This will fail if this object has been made immutable or append_only.
 
         Args:
             index (int): The index of the dictionary object to update.
             updates (Dict[str, Any]): The dictionary containing the updates to apply.
         """
-        self._check_mutable()
-        if not isinstance(updates, dict):
-            raise TypeError("Updates must be a dict.")
+        self._check_mutable(appending=False)
+        if not isinstance(updates, dict): raise TypeError("Updates must be a dict.")
         original = copy.deepcopy(self[index])
         original.update(updates)
-        self.validate_item(original)
+        original = self.validate_item(original)
         super().__setitem__(index, original)
 
     def __repr__(self):
-        return f"listofdicts({list(self)}, immutable={self.immutable}, schema={self.schema})"
+        return f"listofdicts( immutable={self.immutable}, append_only={self.append_only}, schema={self.schema}, \n{list(self)})"
 
     def __eq__(self, other):
         if not isinstance(other, listofdicts):
@@ -342,6 +409,8 @@ class listofdicts(List[Dict[str, Any]]):
             frozenset(self.schema.items()) if self.schema else None
         ))
 
+
+
     def to_json(self, *, indent: Optional[int] = None, preserve_metadata: bool = False) -> str:
         """
         Returns a JSON string representation of the listofdicts instance.
@@ -355,53 +424,71 @@ class listofdicts(List[Dict[str, Any]]):
                 "schema": adj_schema,
                 "schema_add_missing": self.schema_add_missing,
                 "schema_constrain_to_existing": self.schema_constrain_to_existing,
-                "immutable": self.immutable
+                "immutable": self.immutable,
+                "append_only": self.append_only
             }
             return json.dumps({"metadata": self.metadata, "data": list(self), "settings": settings}, indent=indent)
 
         return json.dumps(list(self), indent=indent)
 
     @classmethod
-    def from_json(cls, json_str: str, *, metadata: Optional[Dict[str, Any]] = None, schema: Optional[Dict[str, Type]] = None, schema_add_missing: bool = False, schema_constrain_to_existing: bool = False, immutable: bool = False) -> 'listofdicts':
+    def from_json(cls, json_str: str, *, 
+                  metadata: Optional[Dict[str, Any]] = None, 
+                  schema: Optional[Dict[str, Type]] = None, 
+                  schema_add_missing: bool = False, 
+                  schema_constrain_to_existing: bool = False, 
+                  immutable: bool = False, 
+                  append_only: bool = False) -> 'listofdicts':
         """
         Creates a listofdicts instance from a JSON string.
         """
         if type(json_str) in(list,dict): json_str = json.dumps(json_str)
         data = json.loads(json_str)
         if isinstance(data, list): # no metadata, just data
-            return cls(data, metadata=metadata, immutable=immutable, schema=schema, schema_add_missing=schema_add_missing, schema_constrain_to_existing=schema_constrain_to_existing)
-        if isinstance(data, dict) and "data" in data and isinstance(data["data"], list): # data element is required
-            if 'metadata' not in data: data['metadata'] = {}  # metadata is optional
-            if 'settings' not in data: data['settings'] = {}  # settings are optional
-            if 'schema' in data['settings'] and isinstance(data['settings']['schema'], dict): 
-                # convert schema values (as strings) back into native python types
-                for sname, svalue in data['settings']['schema'].items(): 
-                    match svalue.strip(): # safer than eval, which can execute arbitrary code
-                        case "str": data['settings']['schema'][sname] = str
-                        case "int": data['settings']['schema'][sname] = int
-                        case "float": data['settings']['schema'][sname] = float
-                        case "bool": data['settings']['schema'][sname] = bool
-                        case "date": data['settings']['schema'][sname] = datetime.date
-                        case "datetime": data['settings']['schema'][sname] = datetime.datetime
-                        case "timedelta": data['settings']['schema'][sname] = datetime.timedelta
-                        case "time": data['settings']['schema'][sname] = datetime.time
-                        case "list": data['settings']['schema'][sname] = list
-                        case "dict": data['settings']['schema'][sname] = dict
-                        case "set": data['settings']['schema'][sname] = set
-                        case "tuple": data['settings']['schema'][sname] = tuple
-                        case "bytearray": data['settings']['schema'][sname] = bytearray
-                        case "bytes": data['settings']['schema'][sname] = bytes
-                        case "range": data['settings']['schema'][sname] = range
-                        case "listofdicts": data['settings']['schema'][sname] = listofdicts
-                        case _: data['settings']['schema'][sname] = object
-            return cls(data["data"], 
-                       metadata=data["metadata"],
-                       immutable=data["settings"].get("immutable", immutable), 
-                       schema=data['settings'].get('schema', schema),
-                       schema_add_missing=data['settings'].get('schema_add_missing', schema_add_missing),
-                       schema_constrain_to_existing=data['settings'].get('schema_constrain_to_existing', schema_constrain_to_existing)
-            )
-        raise ValueError("JSON must represent a list of dicts [{},{},...], or a dictionary with {'metadata': {...}, 'data': [{},{},...], an optionally 'settings': {...}} keys.")
+            return cls(data, metadata=metadata, immutable=immutable, append_only=append_only, schema=schema, schema_add_missing=schema_add_missing, schema_constrain_to_existing=schema_constrain_to_existing)
+        
+        # well-formed "data" element is required:
+        if not ( isinstance(data, dict) and 
+                 "data" in data and 
+                 isinstance(data["data"], list)
+                ):
+            raise ValueError("JSON must represent a list of dicts [{},{},...], or a dictionary with {'metadata': {...}, 'data': [{},{},...], and optional 'settings': {...} } keys.") 
+    
+        # the rest is optional:
+        if 'metadata' not in data: data['metadata'] = {}  # metadata is optional
+        if 'settings' not in data: data['settings'] = {}  # settings are optional
+
+        # if schema included, convert schema values (as strings) back into native python types
+        if 'schema' in data['settings'] and isinstance(data['settings']['schema'], dict): 
+            for sname, svalue in data['settings']['schema'].items(): 
+                match svalue.strip(): # safer than eval, which can execute arbitrary code
+                    case "str": data['settings']['schema'][sname] = str
+                    case "int": data['settings']['schema'][sname] = int
+                    case "float": data['settings']['schema'][sname] = float
+                    case "bool": data['settings']['schema'][sname] = bool
+                    case "date": data['settings']['schema'][sname] = datetime.date
+                    case "datetime": data['settings']['schema'][sname] = datetime.datetime
+                    case "timedelta": data['settings']['schema'][sname] = datetime.timedelta
+                    case "time": data['settings']['schema'][sname] = datetime.time
+                    case "list": data['settings']['schema'][sname] = list
+                    case "dict": data['settings']['schema'][sname] = dict
+                    case "set": data['settings']['schema'][sname] = set
+                    case "tuple": data['settings']['schema'][sname] = tuple
+                    case "bytearray": data['settings']['schema'][sname] = bytearray
+                    case "bytes": data['settings']['schema'][sname] = bytes
+                    case "range": data['settings']['schema'][sname] = range
+                    case "listofdicts": data['settings']['schema'][sname] = listofdicts
+                    case _: data['settings']['schema'][sname] = object
+        
+        return cls(data["data"], 
+                    metadata=data["metadata"],
+                    immutable=data["settings"].get("immutable", immutable), 
+                    append_only=data["settings"].get("append_only", append_only), 
+                    schema=data['settings'].get('schema', schema),
+                    schema_add_missing=data['settings'].get('schema_add_missing', schema_add_missing),
+                    schema_constrain_to_existing=data['settings'].get('schema_constrain_to_existing', schema_constrain_to_existing)
+        )
+ 
 
     @classmethod
     def as_llm_prompt(cls, system_prompts, user_prompts, schema:dict = {'role': str, 'content': str}, *prompt_modes ) -> 'listofdicts':
@@ -410,7 +497,7 @@ class listofdicts(List[Dict[str, Any]]):
         """
         if type(system_prompts)==str: system_prompts=[system_prompts]
         if type(user_prompts)==str: user_prompts=[user_prompts]
-        newobj = cls(immutable=False, schema=schema, schema_add_missing=True, schema_constrain_to_existing=False)
+        newobj = cls(immutable=False, append_only=False, schema=schema, schema_add_missing=True, schema_constrain_to_existing=False)
 
         for prompt_mode in prompt_modes: 
             if prompt_mode not in PROMPT_MODES: raise ValueError(f"Invalid prompt mode: {prompt_mode}\nMust be one of {PROMPT_MODES}")
