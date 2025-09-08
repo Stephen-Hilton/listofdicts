@@ -340,28 +340,21 @@ class listofdicts(List[Dict[str, Any]]):
         """
         values = self.unique_key_values(key)
         return [len(str(v)) for v in values]
-    
-    def filter(self, filter_key:str, filter_value = None):
-        """
-        Returns a new listofdicts object, which is a subset of this object, 
-        filtered by given a key and value which is applied to the dicts.
-
-        Args:
-            filter_key (str): The key in the dict to filter by (required).
-            filter_value (Any, optional): The value to filter by. If None (default), returns all dicts that have the filter_key.
-        """
-        return listofdicts([d for d in self if filter_value == None or d[filter_key] == filter_value ]).copy()
 
     def copy(self, *, 
              schema: Optional[Dict[str, Type]] = None, 
              schema_add_missing: Optional[bool] = None, 
              schema_constrain_to_existing: Optional[bool] = None, 
              immutable: Optional[bool] = None,
-             append_only: Optional[bool] = None) -> 'listofdicts':
+             append_only: Optional[bool] = None,
+             filter_key: str = None,
+             filter_value: Any = None) -> 'listofdicts':
         """
         Performs a deep copy of the listofdicts instance, with optional schema and immutability overrides.
+        Optionally, you can apply a filter to limit the list to only dicts that (a) contain a specific key,
+        and optionally, that key matches a specific value. 
         """
-        lod = [dict(d) for d in self]
+        lod = [dict(d) for d in self if (filter_key == None or filter_key in d.keys()) and (filter_value == None or d[filter_key] == filter_value) ]
         return listofdicts(copy.deepcopy(lod),
                            schema=schema if schema is not None else self.schema, 
                            schema_add_missing=schema_add_missing if schema_add_missing is not None else self.schema_add_missing, 
