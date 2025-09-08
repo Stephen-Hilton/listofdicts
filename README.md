@@ -19,6 +19,7 @@ This class is ideal for applications that require structured tabular-like data m
 - ✅ **Schema validation**:
   - `schema_constrain_to_existing`: restrict keys to the schema
   - `schema_add_missing`: auto-insert missing schema keys as `None`
+  - pydantic validation compliant
 - 🔁 **Full list-like behavior**: slicing, appending, extending, sorting, copying, updating
 - 🧠 **Metadata support**: Store additional metadata alongside your list of dicts
 - 🔄 **JSON I/O**: Easily serialize/deserialize from JSON

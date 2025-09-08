@@ -331,7 +331,7 @@ class listofdicts(List[Dict[str, Any]]):
         """
         Returns a list of all unique values across all dicts in the listofdicts, for a given key.
         """
-        if key not in self.unique_keys(): raise KeyError(f"Key '{key}' not found in this listofdicts.")
+        if key not in self.unique_keys(): return []
         return list(set([d[key] for d in self if key in d]))
         
     def unique_key_value_len(self, key:str) -> int:
@@ -340,6 +340,17 @@ class listofdicts(List[Dict[str, Any]]):
         """
         values = self.unique_key_values(key)
         return [len(str(v)) for v in values]
+    
+    def filter(self, filter_key:str, filter_value = None):
+        """
+        Returns a new listofdicts object, which is a subset of this object, 
+        filtered by given a key and value which is applied to the dicts.
+
+        Args:
+            filter_key (str): The key in the dict to filter by (required).
+            filter_value (Any, optional): The value to filter by. If None (default), returns all dicts that have the filter_key.
+        """
+        return listofdicts([d for d in self if filter_value == None or d[filter_key] == filter_value ]).copy()
 
     def copy(self, *, 
              schema: Optional[Dict[str, Type]] = None, 
