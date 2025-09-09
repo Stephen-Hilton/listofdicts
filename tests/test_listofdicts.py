@@ -362,6 +362,22 @@ def test_filter():
     assert len(lod) == 3
 
 
+def test_negative_indexes():
+    data = [{"dog": "sunny", "legs": 4}, {"dog": "luna", "legs": 4}, {"dog": "stumpy", "legs": 3}, {"dog": "fido"}]
+    lod = listofdicts.from_json(data)
+
+    assert lod[0]['dog'] == "sunny"
+    assert lod[1]['dog'] == "luna"
+    assert lod[2]['dog'] == "stumpy"
+    assert lod[3]['dog'] == "fido"
+
+    assert lod[-1]['dog'] == "fido"
+    assert lod[-2]['dog'] == "stumpy"
+    assert lod[-3]['dog'] == "luna"
+    assert lod[-4]['dog'] == "sunny"
+    
+    pass
+
 
 def test_integrations():
     # pydantic:

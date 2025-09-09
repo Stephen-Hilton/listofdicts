@@ -202,9 +202,11 @@ class listofdicts(List[Dict[str, Any]]):
                 and (val == None or d[key] == val) )
     
     def __getitem__(self, index):
+        maxoffset = self.__len__()
         for i, itm in enumerate(self.__iter__()):
             if i == index: return itm
-
+            if i == index + maxoffset: return itm
+     
         if (self.active_filter['key'] or self.active_filter['value']):
             msg = f' - filter active: "{self.active_filter["name"]}" which may be constraining data, try:  lod.clear_filter()'
         else: msg = ''
@@ -661,11 +663,7 @@ if __name__ == "__main__":
     metadata = {'key1':1, 'key2':2}
     lod = listofdicts.from_json(data, metadata=metadata, schema=schema)
     
-    lod.apply_filter("legs", 3, "3legs")
-    # lod.apply_filter(lambda x: x['legs']==4)
-
-    print(lod) 
-
-    
+    for i in [0,1,2,3,-1,-2,-3,-4]:
+        print(lod[i])   
  
     pass
