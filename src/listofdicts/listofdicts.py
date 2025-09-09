@@ -415,28 +415,38 @@ class listofdicts(List[Dict[str, Any]]):
         To remove the filter, simply call the function with no arguments, or use 
         the clear_filter() method.
         """
+        # handle clear requests first:
         clear = (not filter_key and not filter_name and not filter_value) 
+        if clear: 
+            self.filters.insert(0,  {"key":None, "value":None, "name":None} )
+            return self
+        
+        # if not clearing, call filter_name "default" when missing
         if not filter_name: filter_name = "default"
 
+        # if no filters exist, create a default and return
         if not self.filters: 
             self.filters.insert(0, {"key":filter_key, "value":filter_value, "name":filter_name})
             return self
         
+        # if filters exist, loop thru and find the last one with a matching name:
         active_filter = None
         for i, filter in enumerate(self.filters):
-            if filter["name"] == filter_name:
-                active_filter = self.filters.pop(i)
-                if clear: # if everything is None, reset filtering 
-                    active_filter["key"] = None
-                    active_filter["value"] = None
-                elif (filter_key or filter_value): # name set, and key or value set - assume replace with new values
+            if filter["name"] == filter_name:         # the firt name matching our lookup request
+                active_filter = self.filters.pop(i)   # pop out - this will be our record
+                if (filter_key or filter_value):      # key or value set - assume REPLACE named filter with with new data
                     active_filter["key"] = filter_key
                     active_filter["value"] = filter_value
-                else: # name set, and key & value unset - assume named filter lookup
+                else:                                 # key & value unset - assume USE named filter as-is
                     pass # use look-up values as-is
                 break
+        
+        # if we scan all saved filters and find nothing, create new:
         if not active_filter: active_filter =  {"key":filter_key, "value":filter_value, "name":filter_name}
         self.filters.insert(0, active_filter)
+
+        # at this point, we've placed the "active_filter" at index[0] in our filters, 
+        # which is picked up by methods like __iter__, __getitem__, __len__, etc. 
         return self
 
 
