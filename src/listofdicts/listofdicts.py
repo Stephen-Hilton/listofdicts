@@ -344,18 +344,31 @@ class listofdicts(List[Dict[str, Any]]):
         return super().remove(value)
     
 
-    def sort(self, key=None, reverse=False):
+    def sort(self, keys=None, reverse=False):
         """
-        Sort the order of dictionaries within the list by a given dictionary key, with the requirement that 
-        the key must be present in all dictionaries in the list.
+        Sort the order of dictionaries within the list by a given set of dictionary keys, 
+        with the requirement that all keys must be present in all dictionaries in the list.
+        The keys arg can be an interable with up to 5 members (more than 5 are ignored).
         This does not effect the data, only it's order within the list, 
         and therefore can be called on immutable listofdicts objects.
         """
-        if not all(key in d for d in self): raise TypeError(f"All dicts must contain the sort key: {key}")
-        super().sort(key=lambda x: x[key], reverse=reverse)        
+        if isinstance(keys, str): keys = [keys,]
+        keys = list(keys)
+        for key in keys:
+            if not isinstance(key, str): raise TypeError("Keys must be strings.")
+            if not all(key in d for d in self): raise TypeError(f"All dicts must contain the sort key: {key}")
+        match len(keys):
+            case 0: return self 
+            case 1: super().sort(key=lambda x: (x[keys[0]]), reverse=reverse)
+            case 2: super().sort(key=lambda x: (x[keys[0]],x[keys[1]]), reverse=reverse)
+            case 3: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]]), reverse=reverse)
+            case 4: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]]), reverse=reverse)
+            case 5: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]]), reverse=reverse)
+            case _: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]]), reverse=reverse)
         return self
         # TODO: remove restriction: key must be present in all dictionaries in the list
         #       just sort missing to the bottom
+        #       Also, a more dynamic way than the above match / hardcoding?
 
     def unique_keys(self) -> list:
         """
