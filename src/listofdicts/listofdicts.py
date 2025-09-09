@@ -41,6 +41,7 @@ class listofdicts(List[Dict[str, Any]]):
         self._schmaddmiss = schema_add_missing
         self._shmcnst2xst = schema_constrain_to_existing
         self._metadata = metadata if metadata else {}
+        self.filters = []
 
         if iterable is None:
             super().__init__()
@@ -157,9 +158,11 @@ class listofdicts(List[Dict[str, Any]]):
         super().extend(other)
         return self
 
+
     def __add__(self, other: 'listofdicts') -> 'listofdicts':
         self.extend(other)
         return self
+    
     
     def __iadd__(self, other):        
         if isinstance(other, listofdicts): 
@@ -170,6 +173,7 @@ class listofdicts(List[Dict[str, Any]]):
             return self
         raise TypeError("Only listofdicts or dict instances can be added with +=.")
      
+
     def __setitem__(self, index, value):
         self._check_mutable(appending=False)
         if isinstance(index, slice):
@@ -183,12 +187,42 @@ class listofdicts(List[Dict[str, Any]]):
         self._check_mutable(appending=False)
         super().__delitem__(index)
 
+
+    def __iter__(self):
+        # filtering requested 
+        key = self.active_filter['key']
+        val = self.active_filter['value']
+
+        # if key not set, no filter
+        if not key: return super().__iter__()  
+        
+        # filter: 
+        return (d for d in super().__iter__() 
+                if   key in d.keys()
+                and (val == None or d[key] == val) )
+    
+    def __getitem__(self, index):
+        for i, itm in enumerate(self.__iter__()):
+            if i == index: return itm
+
+        if (self.active_filter['key'] or self.active_filter['value']):
+            msg = f' - filter active: "{self.active_filter["name"]}" which may be constraining data, try:  lod.clear_filter()'
+        else: msg = ''
+        raise KeyError(f"Index {index} not found{msg}")
+    
+    def __len__(self):                
+        return sum(1 for _ in self.__iter__())
+    
+
+
     def __str__(self):
         max_key_len = max([len(k) for k in self.unique_keys()])       
         rtn = []
         for r in self:
             rtn.append('{\n\t' + '\n\t'.join([f'{str(n).ljust(max_key_len)} : {v}' for n,v in r.items()]) + '\n}') 
         return  '[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
+    
+    
  
     @classmethod # for pydantic support
     def __get_pydantic_core_schema__(
@@ -308,7 +342,7 @@ class listofdicts(List[Dict[str, Any]]):
         """
         self._check_mutable(appending=False)
         return super().remove(value)
-        
+    
 
     def sort(self, key=None, reverse=False):
         """
@@ -320,6 +354,8 @@ class listofdicts(List[Dict[str, Any]]):
         if not all(key in d for d in self): raise TypeError(f"All dicts must contain the sort key: {key}")
         super().sort(key=lambda x: x[key], reverse=reverse)        
         return self
+        # TODO: remove restriction: key must be present in all dictionaries in the list
+        #       just sort missing to the bottom
 
     def unique_keys(self) -> list:
         """
@@ -340,28 +376,102 @@ class listofdicts(List[Dict[str, Any]]):
         """
         values = self.unique_key_values(key)
         return [len(str(v)) for v in values]
+    
+
+
+    def filter(self, filter_key:str = None, filter_value:Any = None, filter_name:str = None ) -> 'listofdicts':
+        """
+        Applies a filter to the current listofdicts (LOD) object. This dynamically 
+        prevents the iterator object from returning filter-removed dicts, without 
+        actually removing them from the LOD object.  The function also returns the 
+        main iterator, so it can be used directly in a for loop, for example:
+
+            for d in lod.filter("name", "John"):
+                print(d["name"])
+
+        You can optionally store named filters, for ease of re-use:
+
+            for d in lod.filter("pet_count", 0, name="no pets"):
+                print(d["name"]) # name of customer with no pets
+
+            for d in lod.filter(name="no pets"):
+                print(d["name"]) # will return same as above
+
+        To remove the filter, simply call the function with no arguments, or use 
+        the clear_filter() method.
+        """
+        clear = (not filter_key and not filter_name and not filter_value) 
+        if not filter_name: filter_name = "default"
+
+        if not self.filters: 
+            self.filters.insert(0, {"key":filter_key, "value":filter_value, "name":filter_name})
+            return self
+        
+        active_filter = None
+        for i, filter in enumerate(self.filters):
+            if filter["name"] == filter_name:
+                active_filter = self.filters.pop(i)
+                if clear: # if everything is None, reset filtering 
+                    active_filter["key"] = None
+                    active_filter["value"] = None
+                elif (filter_key or filter_value): # name set, and key or value set - assume replace with new values
+                    active_filter["key"] = filter_key
+                    active_filter["value"] = filter_value
+                else: # name set, and key & value unset - assume named filter lookup
+                    pass # use look-up values as-is
+                break
+        if not active_filter: active_filter =  {"key":filter_key, "value":filter_value, "name":filter_name}
+        self.filters.insert(0, active_filter)
+        return self
+
+
+    def clear_filter(self):
+        """
+        Clears the filter applied to the current listofdicts (LOD) object.
+        """
+        return self.filter()
+
+
+    @property
+    def active_filter(self):
+        """
+        Returns the currently active filter applied to the listofdicts (LOD) object.
+        """
+        return self.filters[0] if len(self.filters) > 0 else  {"key":None, "value":None, "name":None}
+    
+ 
 
     def copy(self, *, 
              schema: Optional[Dict[str, Type]] = None, 
              schema_add_missing: Optional[bool] = None, 
              schema_constrain_to_existing: Optional[bool] = None, 
+             metadata: Optional[Dict[str, Any]] = None,
              immutable: Optional[bool] = None,
              append_only: Optional[bool] = None,
              filter_key: str = None,
              filter_value: Any = None) -> 'listofdicts':
         """
-        Performs a deep copy of the listofdicts instance, with optional schema and immutability overrides.
-        Optionally, you can apply a filter to limit the list to only dicts that (a) contain a specific key,
-        and optionally, that key matches a specific value. 
+        Returns a deepcopy instance of the listofdicts (LOD) objects. 
+        Optionally, you can override any LOD object settings such as mutability or schemas, 
+        and can apply a filter to limit the dicts included from the original. 
         """
-        lod = [dict(d) for d in self if (filter_key == None or filter_key in d.keys()) and (filter_value == None or d[filter_key] == filter_value) ]
-        return listofdicts(copy.deepcopy(lod),
-                           schema=schema if schema is not None else self.schema, 
-                           schema_add_missing=schema_add_missing if schema_add_missing is not None else self.schema_add_missing, 
-                           schema_constrain_to_existing=schema_constrain_to_existing if schema_constrain_to_existing is not None else self.schema_constrain_to_existing,
-                           immutable=immutable if immutable is not None else self.immutable,
-                           append_only=append_only if append_only is not None else self.append_only
-                           )
+        data = [dict(d) for d in self if (filter_key == None or filter_key in d.keys()) and (filter_value == None or d[filter_key] == filter_value) ]
+        schema = schema if schema is not None else self.schema
+        schema_add_missing = schema_add_missing if schema_add_missing is not None else self.schema_add_missing
+        schema_constrain_to_existing = schema_constrain_to_existing if schema_constrain_to_existing is not None else self.schema_constrain_to_existing
+        metadata = metadata if metadata is not None else self.metadata
+        immutable = immutable if immutable is not None else self.immutable
+        append_only = append_only if append_only is not None else self.append_only
+        
+        return listofdicts( copy.deepcopy(data), 
+                          schema=copy.deepcopy(self.schema), 
+                          schema_add_missing=schema_add_missing, 
+                          schema_constrain_to_existing=schema_constrain_to_existing,
+                          metadata=copy.deepcopy(self.metadata),
+                          immutable=immutable,
+                          append_only=append_only
+                          )
+    
 
     def as_mutable(self) -> 'listofdicts':
         """
@@ -537,6 +647,9 @@ if __name__ == "__main__":
     data = [{"dog": "sunny", "legs": 4}, {"dog": "luna", "legs": 4}, {"dog": "stumpy", "legs": 3}, {"dog": "fido"}]
     metadata = {'key1':1, 'key2':2}
     lod = listofdicts.from_json(data, metadata=metadata, schema=schema)
+    
+    lod.apply_filter("legs", 3, "3legs")
+    # lod.apply_filter(lambda x: x['legs']==4)
 
     print(lod) 
 
