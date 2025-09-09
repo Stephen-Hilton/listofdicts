@@ -218,11 +218,11 @@ class listofdicts(List[Dict[str, Any]]):
 
 
     def __str__(self):
-        max_key_len = max([len(k) for k in self.unique_keys()])       
+        max_key_len = max([len(k) for k in self.unique_keys()])  if self else 0
         rtn = []
         for r in self:
             rtn.append('{\n\t' + '\n\t'.join([f'{str(n).ljust(max_key_len)} : {v}' for n,v in r.items()]) + '\n}') 
-        return  '[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
+        return  'Data:\n[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
     
     
  
@@ -663,7 +663,7 @@ if __name__ == "__main__":
     metadata = {'key1':1, 'key2':2}
     lod = listofdicts.from_json(data, metadata=metadata, schema=schema)
     
-    for i in [0,1,2,3,-1,-2,-3,-4]:
-        print(lod[i])   
+    lod = listofdicts([])
+    print(lod)
  
     pass
