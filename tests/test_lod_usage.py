@@ -44,7 +44,7 @@ def test_usage():
     lod.append({"cat": "mutantcat", "legs":5}) 
     lod += {"cat": "zombiecat", "legs":3.5}
     lod.extend( [{"cat": "frankencat", "legs":8}] )
-    lod = lod + [{"cat": "catmat", "legs":0}]
+    lod = lod + [{"cat": "catmat", "legs":0}]  # this creates a new object instance
     assert len(lod) == 8
 
     # The only way to "turn off" append_only is to create a new deep copy of the object.
@@ -106,43 +106,77 @@ def test_usage():
     with pytest.raises(AttributeError): lod.append({"cat": "mutantcat", "legs":5}) 
     with pytest.raises(AttributeError): lod += {"cat": "zombiecat", "legs":3.5}
     with pytest.raises(AttributeError): lod.extend( [{"cat": "frankencat", "legs":8}] )
-    with pytest.raises(AttributeError): lod = lod + [{"cat": "catmat", "legs":0}]
     assert len(lod) == 4
 
-    # The only way to "turn off" immutable is to create a new deep copy of the object.
-    # This can be done using using:  lod2 = lod.copy(immutable=False)
-    # or the helper function,  lod2 = lod.as_mutable()
-    lod2 = lod.copy(immutable=False)
+    # Once there are records and the LoD is marked as immutable, you cannot change that setting:
+    with pytest.raises(AttributeError): lod.immutable = False
+
+    # you can toggle as many times BEFORE you load data:
+    lod = listofdicts([])
+    lod.immutable = True
+    assert lod.immutable == True
+    lod.immutable = False
+    assert lod.immutable == False
+    lod.immutable = True
+    lod.immutable = False
+    lod.immutable = True
+    lod.immutable = False
+    lod.immutable = True
+
+    # once you add data however, you CANNOT set to mutable again
+    lod.immutable = False
+    lod += [ {"cat": "zelda", "legs":4},
+             {"cat": "link", "legs":4}, 
+             {"cat": "stumpy", "legs":3},
+             {"cat": "mutantcat", "legs":5} ]
+    lod.immutable = True
+    with pytest.raises(AttributeError): lod.immutable = False
+    with pytest.raises(AttributeError): lod.clear() # since you can't clear records, immutabile flag gets stuck on True
+    
+
+    # TURNING OFF IMMUTABILITY
+    # There are a few ways to "turn off" immuntablility: 
+
+    # copy() command: all properties are inherited from the original LoD, but you can override at create time:
+    lod2 = lod.copy(immutable=False, append_only=False)
     # now these will all work:
     lod2.append({"cat": "mutantcat", "legs":5}) 
     lod2 += {"cat": "zombiecat", "legs":3.5}
     lod2.extend( [{"cat": "frankencat", "legs":8}] )
-    lod2 = lod2 + [{"cat": "catmat", "legs":0}]
-    assert len(lod2) == 8
+    assert len(lod2) == 7
+    assert len(lod) == 4 # this is still a new object, NOT making the existing object immutable
+
+    # as_mutable() command: a shortcut that essentially just does:  lod.copy(immutable=False, append_only=False)
+    lod3 = lod.as_mutable()
+    # now these will all work:
+    lod3.append({"cat": "mutantcat", "legs":5}) 
+    lod3 += {"cat": "zombiecat", "legs":3.5}
+    lod3.extend( [{"cat": "frankencat", "legs":8}] )
+    assert len(lod2) == 7
+    assert len(lod) == 4 # this is still a new object, NOT making the existing object immutable
+
+    # `+ [list]`` also creates a NEW LoD object, inheriting all properties of the first object. 
+    # In this case, lod4 is still immutable (since lod was), but can be modified at create time.  
+    # i.e., we can add one more row, but still have lod4 be immutable:
+    lod4 = lod + [{"cat": "catmat", "legs":0}]
+    assert len(lod4.filter("cat", "catmat")) == 1  # record added
+    lod4.clear_filter()
+    assert len(lod4) == 5
+    assert len(lod) == 4 # this is still a new object, NOT making the existing object immutable
+    with pytest.raises(AttributeError): lod4.append({"cat": "mutantcat", "legs":5})  # but still immutable after create time
+    
 
 
-    # you can go from mutable to immutable using the same copy() method, or with:
-    lod3 = lod2.as_immutable()
-    assert lod3.immutable == True
-    assert len(lod3) == 8
-    with pytest.raises(AttributeError): lod3.append({"cat": "errorcat", "legs":4}) == None # NO appends
-    with pytest.raises(AttributeError): lod3[0]["legs"] -= 1  # NO updates
-    assert len(lod3) == 8
 
 
-    # append / extend functions
+
+    # append / extend functions (mutable)
     lod = listofdicts([{"kid": "susie", "favorite color":"blue"},
                        {"kid": "joe", "favorite color":"green"}])
     lod.append({"kid": "bob", "favorite color":"yellow"})
-
     lod.extend(listofdicts([{"kid": "jane", "favorite color":"orange"}]))
-    assert lod[0]["kid"] == "susie"
-    assert lod[1]["kid"] == "joe"
-    assert lod[2]["kid"] == "bob"
-    assert lod[3]["kid"] == "jane"
-
-    lod = lod + listofdicts([{"kid": "raul", "favorite color":"blue"}])
-    lod += {"kid": "divya", "favorite color":"yellow"}
+    lod = lod + listofdicts([{"kid": "raul", "favorite color":"blue"}]) # creates a new object with lod + [new object]
+    lod += {"kid": "divya", "favorite color":"yellow"} # adds one row
     lod += listofdicts([{"kid": "gustav", "favorite color":"white"}])
     assert lod[0]["kid"] == "susie"
     assert lod[1]["kid"] == "joe"
@@ -151,26 +185,24 @@ def test_usage():
     assert lod[4]["kid"] == "raul"
     assert lod[5]["kid"] == "divya"
     assert lod[6]["kid"] == "gustav"
+      
     
-    # the "+" extends, and needs to be a list type, not a dict type:
-    with pytest.raises(TypeError): lod = lod + {"kid": "errorkid", "favorite color":"red"}
-    lod = lod + [{"kid": "errorkid", "favorite color":"red"}]
     
     # USAGE: SCHEMAS
     schema = {'dog': str, 'tail':bool, 'legs':int}
     lod = listofdicts([{"dog": "sunny", 'legs':4, 'tail':True}], schema=schema)
     lod.append({"dog": "luna", 'legs':4, 'tail':True})
-    with pytest.raises(TypeError): lod.append({"dog": "errordog", 'legs':4}) # missing tail key
+    with pytest.raises(AttributeError): lod.append({"dog": "errordog", 'legs':4}) # missing tail key
     assert lod[0]["dog"] == "sunny"
     assert lod[1]["dog"] == "luna"
 
     lod2 = listofdicts([{"dog": "stella", 'legs':4, 'tail':True},
                         {"dog": "fido", 'legs':4, 'tail':False},
-                        {"dog": "rex", 'legs':4}] )
-    with pytest.raises(TypeError):  lod.extend(lod2) # missing tail key
-    assert len(lod) == 2 # didn't insert the above
+                        {"dog": "rex", 'legs':4}] ) # no "tail" key
+    with pytest.raises(AttributeError):  lod.extend(lod2) # missing tail key, so entire dataset rejected
+    assert len(lod) == 2 # still only original two dicts
 
-    lod.schema_add_missing = True  # now add any missing keys, with None value
+    lod.schema_add_missing = True  # now add any missing keys, with None value (instead of erroring)
     lod.extend(lod2)
     assert lod[0]["dog"] == "sunny"
     assert lod[1]["dog"] == "luna"
@@ -185,7 +217,8 @@ def test_usage():
     with pytest.raises(TypeError): lod += {"dog": "errordog", 'legs':4, 'tail':'True'} 
     with pytest.raises(TypeError): lod += {"dog": "errordog", 'legs':4, 'tail':1} 
 
-    # note, this only matters if there is a schema defined
+    # note, this only matters if there is a schema defined.  
+    # Turn off the schema and rerun the same type-mismatched inserts above, all inserts will work:
     lod.schema = None 
     lod += {"dog": "errordog1", 'legs':'4', 'tail':True} 
     lod += {"dog": "errordog2", 'legs':4, 'tail':'True'} 
@@ -203,7 +236,7 @@ def test_usage():
     assert len(lod) == 8
 
     # however, you can't apply "constrain to existing" if existing data will violate the rule
-    with pytest.raises(TypeError): lod.schema_constrain_to_existing = True
+    with pytest.raises(AttributeError): lod.schema_constrain_to_existing = True
 
     # to make this change, you have to fix your data:
     for d in lod:
@@ -217,7 +250,7 @@ def test_usage():
     lod.schema = {'dog': str, 'legs':int}
     lod.schema_constrain_to_existing = True
 
-    # there are no restrictions on changing "add missing" setting, as it only adds if needed, not removes
+    # there are no restrictions on changing "add missing" setting.   
     lod.schema_add_missing = True
     lod.schema_add_missing = False
     lod.schema_add_missing = True
@@ -231,13 +264,32 @@ def test_usage():
     assert len(lod) == 2
     assert all(['calories' in d for d in lod])     
 
-    lod.schema={'snack':str, 'type':str, 'calories':int, 'new':bool} # added 'new' key
+    lod.schema={'snack':str, 'type':str, 'calories':int, 'new':bool} # added 'new' key to the schema
     assert all(['new' in d for d in lod]) # immediately added to all dicts, because schema_add_missing=True    
 
-    lod.clear()
-    assert len(lod) == 0
 
 
+    # creating a non-schema object, then applying a schema after with schema_add_missing = True
+    lod = listofdicts.from_json('[{"snack":"chips", "type":"salty"}, {"snack":"cookies", "type":"sweet"}]')
+    assert len(lod) == 2
+    assert 'calories' not in lod[0]
+    assert 'calories' not in lod[1]
+
+    # applying the schema first will error, since the data is out-of-compliance (no 'calories' key):
+    with pytest.raises(AttributeError): lod.schema={'snack':str, 'type':str, 'calories':int}
+    assert len(lod) == 2
+    assert 'calories' not in lod[0]
+    assert 'calories' not in lod[1]
+
+    # add the schema_add_missing = True FIRST, the LoD will populate any missing keys (and going forward)
+    # this allows the schema to be applied, since the data is auto-forced to compliance.
+    lod.schema_add_missing = True
+    lod.schema={'snack':str, 'type':str, 'calories':int}
+    assert len(lod) == 2
+    assert 'calories' in lod[0] 
+    assert lod[0]['calories'] == None   
+    assert 'calories' in lod[1] 
+    assert lod[1]['calories'] == None   
 
 
     # new lod with metadata set at instantiation time:
@@ -246,24 +298,32 @@ def test_usage():
     assert lod.metadata == md
     assert len(lod) == 0
 
-    # from_json ()
+    # metadata can be updated at anytime - its really just a dict:
+    lod.metadata = {"foo":"bar", "this is": "completely arbitrary"}
+    assert lod.metadata['foo'] == "bar"
+    assert len(lod.metadata) == 2
+    md = lod.metadata 
+
+    # from_json() -- deserializes a json string containing a list of dictionaries:
     data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
     json_doc = json.dumps(data)
 
-    lod = listofdicts.from_json(json_doc)
+    lod = listofdicts.from_json(json_doc, metadata=md)
     assert len(lod) == 5
     assert lod[0]['dog'] == "sunny"
     assert lod[1]['dog'] == "luna"
     assert lod[2]['dog'] == "stella"
     assert lod[3]['dog'] == "fido"
     assert lod[4]['dog'] == "rex"
+    assert lod.metadata == md   
 
-    # from_json (preserve_metadata=True)
+
+    # to_json() -- serializes to a json document
     schema = {'dog': str}
     data = [{"dog": "sunny"}, {"dog": "luna"}, {"dog": "stella"}, {"dog": "fido"}, {"dog": "rex"}]
     metadata = {'key1':1, 'key2':2}
 
-    lod = listofdicts.from_json(data, metadata=metadata, schema=schema, immutable=True)
+    lod = listofdicts(data, metadata=metadata, schema=schema, immutable=True)
     assert lod.schema == schema
     assert lod.metadata == metadata
     assert list(lod) == data
@@ -282,5 +342,4 @@ def test_usage():
 
  
 if __name__ == '__main__':
-    # test_usage()
     test_usage()

@@ -1,4 +1,4 @@
-import copy, json, datetime
+import copy, json, datetime, warnings
 from typing import List, Dict, Any, Iterable, Optional, Type
 from enum import StrEnum
 from pydantic_core import core_schema
@@ -15,6 +15,7 @@ class ImmutableDict(Dict):
     def clear(self): raise AttributeError("Cannot clear an immutable dictionary")
     def pop(self, *args, **kwargs): raise AttributeError("Cannot pop from an immutable dictionary")
     def popitem(self):raise AttributeError("Cannot popitem from an immutable dictionary")
+    def remove(self): raise AttributeError("Cannot delete items from an immutable dictionary")
 
 
 class listofdicts(List[Dict[str, Any]]):
@@ -32,16 +33,18 @@ class listofdicts(List[Dict[str, Any]]):
         schema_constrain_to_existing: bool = False,
         immutable: bool = False,
         append_only: bool = False,
+        reject_dups: bool = False,
         metadata: Optional[Dict[str, Any]] = None
     ):
 
-        self.immutable = immutable
+        self._immutable = immutable
         self.append_only = append_only
         self._schm = schema
         self._schmaddmiss = schema_add_missing
         self._shmcnst2xst = schema_constrain_to_existing
         self._metadata = metadata if metadata else {}
         self.filters = []
+        self.reject_dups = reject_dups
 
         if iterable is None:
             super().__init__()
@@ -59,6 +62,7 @@ class listofdicts(List[Dict[str, Any]]):
         """
         if self._metadata is None: self._metadata = {}
         return self._metadata
+
 
     @metadata.setter
     def metadata(self, value:dict):
@@ -137,6 +141,52 @@ class listofdicts(List[Dict[str, Any]]):
         return self._schmaddmiss
         
 
+    @property
+    def immutable(self) -> bool:
+        return self._immutable
+    
+    @immutable.setter
+    def immutable(self, newvalue:bool):
+        # if no change, do nothing:
+        if newvalue == self._immutable: return None
+        
+        # make sure we have full dataset:
+        itemcount = len(self.__unfiltered_data__())
+        
+        # don't care if there's no records
+        if itemcount == 0: self._immutable = newvalue 
+        
+        # if there are records, and there is a change:
+        if self._immutable == True and newvalue == False: 
+                raise AttributeError("Can only make a listofdict mutable if empty (no dicts).")
+        if self._immutable == False and newvalue == True: 
+            # make all dict objects into immutabledicts, then mark true
+            for i, item in enumerate(self):
+                item = ImmutableDict(item)
+                self[i] = item
+            self._immutable = newvalue 
+
+        
+    @property
+    def is_filtered(self) -> bool:
+        """Returns True if the listofdicts object is currently filtered, False otherwise."""
+        if len(self.filters) == 0: return False 
+        af = self.active_filter
+        if af['key']: return True
+        return False
+        
+ 
+
+    @property
+    def active_filter(self):
+        """
+        Returns the currently active filter applied to the listofdicts (LOD) object.
+        """
+        return self.filters[0] if len(self.filters) > 0 else  {"key":None, "value":None, "name":None}
+    
+
+
+
     def append(self, item: Dict[str, Any]) -> None:
         """
         Append a dictionary to the end of this listofdicts object. 
@@ -145,7 +195,8 @@ class listofdicts(List[Dict[str, Any]]):
         """
         self._check_mutable(appending=True)
         item = self.validate_item(item)
-        super().append(item)
+        if self.__dupcheck_insertok__(item): super().append(item)
+
 
     def extend(self, other: 'listofdicts') -> None:
         """
@@ -153,19 +204,27 @@ class listofdicts(List[Dict[str, Any]]):
         This will fail if this object has been made immutable (append_only is fine), or
         if the schema was defined and enforced, and the new dictionary keys do not match the schema.
         """
+        # needs to be all-or-nothing:
         self._check_mutable(appending=True)
-        other = self.validate_all(other)
-        super().extend(other)
-        return self
+        # validate all incoming data to ensure a smooth insert
+        self.validate_all(other)
+        # if all ok, extend:
+        return super().extend(other)
 
 
-    def __add__(self, other: 'listofdicts') -> 'listofdicts':
-        self.extend(other)
-        return self
+    def __add__(self, other: list) -> 'listofdicts':
+        return listofdicts([dict(d) for d in self] + other,
+                            schema=copy.deepcopy(self.schema),
+                            schema_add_missing=self.schema_add_missing,
+                            schema_constrain_to_existing=self.schema_constrain_to_existing,
+                            immutable=self.immutable,
+                            append_only=self.append_only,
+                            reject_dups=self.reject_dups,
+                            metadata=copy.deepcopy(self.metadata) )
     
     
     def __iadd__(self, other):        
-        if isinstance(other, listofdicts): 
+        if isinstance(other, list): 
             self.extend(other)
             return self
         if isinstance(other, dict): 
@@ -176,17 +235,54 @@ class listofdicts(List[Dict[str, Any]]):
 
     def __setitem__(self, index, value):
         self._check_mutable(appending=False)
-        if isinstance(index, slice):
-            value = self.validate_all(copy.deepcopy(value))
-            super().__setitem__(index, value)
-        else:
-            value = self.validate_item(copy.deepcopy(value))
-            super().__setitem__(index, value)
+        value = self.validate_item(value)
+        super().__setitem__(index, value)
+
 
     def __delitem__(self, index):
         self._check_mutable(appending=False)
-        super().__delitem__(index)
+        index = self.__unfiltered_index__(int(index))
+        return super().__delitem__(index)
 
+
+    def pop(self, index:int = -1 ):
+        """
+        Remove and return an element from the listofdicts object, at the given index (default last).
+        This will fail if this object has been made immutable or append_only.
+        """
+        self._check_mutable(appending=False)
+        index = self.__unfiltered_index__(int(index))
+        return super().pop(index)
+
+
+    def popitem(self):
+        """
+        Remove and return an element from the listofdicts object.
+        This will fail if this object has been made immutable or append_only.
+        """
+        self._check_mutable(appending=False)
+        return super().popitem()
+    
+
+    def remove(self, value):
+        """
+        Remove an element from the listofdicts object (in place), by value (aka dictionary).
+        The dictionary value provided must match exactly.
+        This will fail if this object has been made immutable or append_only.
+        """
+        self._check_mutable(appending=False)
+        return super().remove(value)
+
+
+    def clear(self) -> None:
+        """
+        Clear the listofdicts object (in place).
+        This will fail if this object has been made immutable or append_only.
+        """
+        self._check_mutable(appending=False)
+        self.clear_filter()
+        return super().clear()
+        
 
     def __iter__(self):
         # filtering requested 
@@ -200,22 +296,30 @@ class listofdicts(List[Dict[str, Any]]):
         return (d for d in super().__iter__() 
                 if   key in d.keys()
                 and (val == None or d[key] == val) )
-    
-    def __getitem__(self, index):
-        maxoffset = self.__len__()
+
+
+    def __getitem__(self, index: int | slice):
+        if type(index) == slice:
+            rtn = []
+            for i in range(*index.indices(len(self))):
+                rtn.append(self[i])
+            return rtn
+
+        # adjust for negative (filtered) indexes:
+        if index <0: index = self.__len__() + index
+
         for i, itm in enumerate(self.__iter__()):
             if i == index: return itm
-            if i == index + maxoffset: return itm
      
         if (self.active_filter['key'] or self.active_filter['value']):
             msg = f' - filter active: "{self.active_filter["name"]}" which may be constraining data, try:  lod.clear_filter()'
         else: msg = ''
         raise KeyError(f"Index {index} not found{msg}")
     
+
     def __len__(self):                
         return sum(1 for _ in self.__iter__())
     
-
 
     def __str__(self):
         max_key_len = max([len(k) for k in self.unique_keys()])  if self else 0
@@ -224,8 +328,38 @@ class listofdicts(List[Dict[str, Any]]):
             rtn.append('{\n\t' + '\n\t'.join([f'{str(n).ljust(max_key_len)} : {v}' for n,v in r.items()]) + '\n}') 
         return  'Data:\n[' + ','.join(rtn) + ']\nMetadata:\n' + str(self.metadata)
     
+
+    def __reversed__(self):
+        return iter(self[::-1]) 
+
+
     
+    def __unfiltered_data__(self):
+        # remove filter long enough to shallow-copy list, then re-apply
+        self.filters.insert(0, {"key":None, "value":None, "name":None} )
+        rtn = [d for d in self]
+        self.filters.pop(0)
+        return rtn  
+
+
+    def __unfiltered_index__(self, filtered_index:int) -> int:
+        """
+        Given a filtered index, return the index in the unfiltered list.
+        """
+        if not self.is_filtered: return filtered_index
+        ulist = self.__unfiltered_data__()
+        return ulist.index(self[filtered_index])
+    
+
+    def __dupcheck_insertok__(self, newitem:dict):
+        if not self.reject_dups: return True # good to insert
+        if (newitem in self): 
+            warnings.warn(f"Duplicate dictionary REJECTED: \n{newitem}")
+            return False # duplicate, insert should not happen
+        else: 
+            return True # good to insert
  
+
     @classmethod # for pydantic support
     def __get_pydantic_core_schema__(
         cls, 
@@ -237,31 +371,13 @@ class listofdicts(List[Dict[str, Any]]):
             core_schema.list_schema(core_schema.dict_schema())
         )
     
-    @classmethod  # for pydantic support
-    def _validate(cls, value):
-        # Convert value into a listofdicts instance
-        if isinstance(value, cls): return value
-        if isinstance(value, dict): return cls([value])   
-        return cls(value)
-
 
     def _check_mutable(self, appending:bool = False):
         if self.immutable: raise AttributeError("This listofdicts instance is immutable.")
         if self.append_only and not appending: raise AttributeError("This listofdicts instance is append only, you cannot modify existing entries.")
 
-    def validate_all(self, iterable: Iterable[Dict[str, Any]] = None) -> list:
-        """
-        Validate all elements in the listofdicts object.
-        This will fail if the schema was defined and enforced, and any dictionary keys do not match the schema.
-        This can be useful to ensure that all elements in the listofdicts object are valid, before applying a new schema.
-        """
-        if iterable is None: iterable = self
-        if not isinstance(iterable, list): raise TypeError("Requires a list or listofdicts type.")
-        for pos, item in enumerate(iterable): 
-            iterable[pos] = self.validate_item(item) # this does all checking / reporting
-        return iterable
 
-    def make_dict_immutable(self, dict_item:dict):
+    def get_immutable_dict(self, dict_item:dict):
         """
         Subclasses dict with ImmutableDict() object, making it immutable.  This is used automatically when 
         setting the parent to either immutable or append_only, however you can use it on individual dicts 
@@ -271,18 +387,31 @@ class listofdicts(List[Dict[str, Any]]):
         """
         return ImmutableDict(dict_item) 
     
-
+    
+    def get_by_key(self, key:str, value:Any = None,  index: int | slice = None ) -> list:
+        """
+        Get a list of dictionaries from the listofdicts object that match the given key, and 
+        either value, index, or both.  If value and index are omitted, will return all dicts
+        containing the key. 
+        """
+        result_list = list( [d for d in self if 
+                             (key in d.keys() and d[key] in(value, None)) ])
+        if index != None: result_list = result_list[index]
+        return result_list
+        
+    
     def validate_item(self, new_item: Dict[str, Any]) -> dict:
         """
-        Validate a single dictionary element in the listofdicts object.
+        Validate a single dictionary object to confirm it's valid to insert into the current listofdicts object.
         This will fail if the schema was defined and enforced, and any dictionary keys do not match the schema.
-        This can be useful to ensure the new dict elements is valid, before inserting into the listofdicts object.
+        It will return the dictionary item if good, otherwise raise the appropriate error 
+        (usually AttributeError or TypeError).
         """
         if not isinstance(new_item, dict): raise TypeError("Element must be a dictionary.")
         
-        # new_item should be ImmutableDict if the list is immutable or append_only, otherwise just a dict
+        # new_item should be ImmutableDict if the list is immutable or append_only, otherwise whatever is provided
         if (self.append_only or self.immutable) and type(new_item) != ImmutableDict:  
-            new_item = self.make_dict_immutable(new_item)        
+            new_item = self.get_immutable_dict(new_item)        
 
         # everything else is schema validation:
         if not self.schema: return new_item
@@ -291,7 +420,7 @@ class listofdicts(List[Dict[str, Any]]):
         if self.schema_constrain_to_existing:
             extra_keys = [k for k in list(new_item.keys()) if k not in  list(self.schema.keys())]
             if extra_keys != []:
-                raise TypeError(f"New dictionary has extra keys ({', '.join(extra_keys)}) and schema_constrain_to_existing is True.")
+                raise AttributeError(f"New dictionary has extra keys ({', '.join(extra_keys)}) and schema_constrain_to_existing is True.")
 
         # deal with missing keys
         missing_keys = [k for k in list(self.schema.keys()) if k not in list(new_item.keys())] 
@@ -299,7 +428,7 @@ class listofdicts(List[Dict[str, Any]]):
             if self.schema_add_missing: 
                 for k in missing_keys: new_item[k] = None
             else: 
-                raise TypeError(f"New dictionary has missing keys ({', '.join(missing_keys)}).")
+                raise AttributeError(f"New dictionary has missing keys ({', '.join(missing_keys)}).")
 
         # check value types: TODO: need to iterate thru schema keys, not new_item keys
         mismatched_types = [f'key "{k}" should be {str(self.schema[k])}, got {str(type(new_item[k]))}' 
@@ -313,37 +442,17 @@ class listofdicts(List[Dict[str, Any]]):
         return new_item
 
 
-    def clear(self):
+    def validate_all(self, iterable: Iterable[Dict[str, Any]] = None) -> list:
         """
-        Clear the listofdicts object (in place).
-        This will fail if this object has been made immutable or append_only.
+        Validate all elements in the listofdicts object.  Optionally, you can supply an external iterable to validate,
+        allowing you to pre-validate new listofdicts / lists of dicts before extending the current object.
+        This will fail if the schema was defined and enforced, and any dictionary keys do not match the schema.
         """
-        self._check_mutable(appending=False)
-        super().clear()
-
-    def pop(self, index=-1):
-        """
-        Remove and return an element from the listofdicts object, at the given index (default last).
-        This will fail if this object has been made immutable or append_only.
-        """
-        self._check_mutable(appending=False)
-        return super().pop(index)
-
-    def popitem(self):
-        """
-        Remove and return an element from the listofdicts object.
-        This will fail if this object has been made immutable or append_only.
-        """
-        self._check_mutable(appending=False)
-        return super().popitem()
-    
-    def remove(self, value):
-        """
-        Remove an element from the listofdicts object (in place), by value (aka dictionary).
-        This will fail if this object has been made immutable or append_only.
-        """
-        self._check_mutable(appending=False)
-        return super().remove(value)
+        if iterable is None: iterable = self
+        if not isinstance(iterable, list): raise TypeError("Requires a list or listofdicts type.")
+        for pos, item in enumerate(iterable): 
+            iterable[pos] = self.validate_item(item) # this does all checking / reporting
+        return iterable
     
 
     def sort(self, keys=None, reverse=False):
@@ -359,18 +468,21 @@ class listofdicts(List[Dict[str, Any]]):
         for key in keys:
             if not isinstance(key, str): raise TypeError("Keys must be strings.")
             if not all(key in d for d in self): raise TypeError(f"All dicts must contain the sort key: {key}")
+            # TODO: remove restriction: key must be present in all dictionaries in the list; just sort missing to the bottom
         match len(keys):
-            case 0: return self 
+            case 0: return self  # TODO: make dynamic for N-number of keys. Today cannot exceed 10 (which covers 99.9% use-cases)
             case 1: super().sort(key=lambda x: (x[keys[0]]), reverse=reverse)
             case 2: super().sort(key=lambda x: (x[keys[0]],x[keys[1]]), reverse=reverse)
             case 3: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]]), reverse=reverse)
             case 4: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]]), reverse=reverse)
             case 5: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]]), reverse=reverse)
-            case _: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]]), reverse=reverse)
+            case 6: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]],x[keys[5]]), reverse=reverse)
+            case 7: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]],x[keys[5]],x[keys[6]]), reverse=reverse)
+            case 8: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]],x[keys[5]],x[keys[6]],x[keys[7]]), reverse=reverse)
+            case 9: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]],x[keys[5]],x[keys[6]],x[keys[7]],x[keys[8]]), reverse=reverse)
+            case _: super().sort(key=lambda x: (x[keys[0]],x[keys[1]],x[keys[2]],x[keys[3]],x[keys[4]],x[keys[5]],x[keys[6]],x[keys[7]],x[keys[8]],x[keys[9]]), reverse=reverse)
         return self
-        # TODO: remove restriction: key must be present in all dictionaries in the list
-        #       just sort missing to the bottom
-        #       Also, a more dynamic way than the above match / hardcoding?
+        
 
     def unique_keys(self) -> list:
         """
@@ -378,12 +490,14 @@ class listofdicts(List[Dict[str, Any]]):
         """
         return list(set([k for d in self for k in d.keys()]))
     
+    
     def unique_key_values(self, key:str) -> list:
         """
         Returns a list of all unique values across all dicts in the listofdicts, for a given key.
         """
         if key not in self.unique_keys(): return []
         return list(set([d[key] for d in self if key in d]))
+    
         
     def unique_key_value_len(self, key:str) -> int:
         """
@@ -393,7 +507,6 @@ class listofdicts(List[Dict[str, Any]]):
         return [len(str(v)) for v in values]
     
 
-
     def filter(self, filter_key:str = None, filter_value:Any = None, filter_name:str = None ) -> 'listofdicts':
         """
         Applies a filter to the current listofdicts (LOD) object. This dynamically 
@@ -401,45 +514,45 @@ class listofdicts(List[Dict[str, Any]]):
         actually removing them from the LOD object.  The function also returns the 
         main iterator, so it can be used directly in a for loop, for example:
 
-            for d in lod.filter("name", "John"):
+            for d in lod.filter(filter_key="name", filter_value="John"):
                 print(d["name"])
 
         You can optionally store named filters, for ease of re-use:
 
-            for d in lod.filter("pet_count", 0, name="no pets"):
+            for d in lod.filter("pet_count", 0, filter_name="no pets"):
                 print(d["name"]) # name of customer with no pets
 
-            for d in lod.filter(name="no pets"):
+            for d in lod.filter(name="no pets"): # reuse named filter
                 print(d["name"]) # will return same as above
 
-        To remove the filter, simply call the function with no arguments, or use 
-        the clear_filter() method.
+        To remove the filter, simply call  lod.filter()  with no parameters,
+        or use the  clear_filter()  method.
         """
-        # handle clear requests first:
-        clear = (not filter_key and not filter_name and not filter_value) 
-        if clear: 
+        # make list unique:
+        self.filters = self.uniquify(list_to_uniquify=self.filters)
+
+        # handle "clear filters" first:
+        if (not filter_key and not filter_name and not filter_value): 
             self.filters.insert(0,  {"key":None, "value":None, "name":None} )
             return self
         
         # if not clearing, call filter_name "default" when missing
         if not filter_name: filter_name = "default"
 
-        # if no filters exist, create a default and return
+        # if filters are completely empty, just create new and return
         if not self.filters: 
             self.filters.insert(0, {"key":filter_key, "value":filter_value, "name":filter_name})
             return self
         
-        # if filters exist, loop thru and find the last one with a matching name:
+        # if filters exist, find the lastest one with a matching filter_name:
         active_filter = None
         for i, filter in enumerate(self.filters):
-            if filter["name"] == filter_name:         # the firt name matching our lookup request
+            if filter["name"] == filter_name:         # the first name matching our lookup request
                 active_filter = self.filters.pop(i)   # pop out - this will be our record
                 if (filter_key or filter_value):      # key or value set - assume REPLACE named filter with with new data
                     active_filter["key"] = filter_key
                     active_filter["value"] = filter_value
-                else:                                 # key & value unset - assume USE named filter as-is
-                    pass # use look-up values as-is
-                break
+                break                                 # key & value unset - assume USE named filter as-is (no change)
         
         # if we scan all saved filters and find nothing, create new:
         if not active_filter: active_filter =  {"key":filter_key, "value":filter_value, "name":filter_name}
@@ -457,14 +570,36 @@ class listofdicts(List[Dict[str, Any]]):
         return self.filter()
 
 
-    @property
-    def active_filter(self):
+    def uniquify(self, list_to_uniquify: Optional[list] = None):
         """
-        Returns the currently active filter applied to the listofdicts (LOD) object.
+        Removes duplicate dicts (all keys/values) from the list (regardless of dict key order).
+        This happens in-place, but also returns the object.  
+        Optionally, you can provide a list of dictionaries to uniquify.  
+        If omitted, then the current LoD object is used.
+        Will fail if the target list / LoD is immutable or append_only.
         """
-        return self.filters[0] if len(self.filters) > 0 else  {"key":None, "value":None, "name":None}
-    
+        if list_to_uniquify == None:
+            self._check_mutable(appending=False)  
+            target_list = self 
+        else:
+            target_list = list_to_uniquify
+
+        if target_list == []: return target_list
+
+        found_items = []
+        pop_list = []
  
+        # Remove from existing object, rather than creating a new object
+        for idx, item in enumerate(target_list):
+            sorted_dict = dict(sorted(item.items()))
+            if sorted_dict not in found_items: 
+                found_items.append(sorted_dict) # if missing, store and continue
+            else:
+                pop_list.append(idx) # record which record to pop out
+        
+        removed = [target_list.pop(p) for p in reversed(pop_list)] # remove dicts (highest to lowest index)
+        return target_list
+     
 
     def copy(self, *, 
              schema: Optional[Dict[str, Type]] = None, 
@@ -473,20 +608,24 @@ class listofdicts(List[Dict[str, Any]]):
              metadata: Optional[Dict[str, Any]] = None,
              immutable: Optional[bool] = None,
              append_only: Optional[bool] = None,
+             reject_dups: Optional[bool] = None,
              filter_key: str = None,
-             filter_value: Any = None) -> 'listofdicts':
+             filter_value: Any = None,
+             **kwargs) -> 'listofdicts':
         """
         Returns a deepcopy instance of the listofdicts (LOD) objects. 
         Optionally, you can override any LOD object settings such as mutability or schemas, 
         and can apply a filter to limit the dicts included from the original. 
         """
-        data = [dict(d) for d in self if (filter_key == None or filter_key in d.keys()) and (filter_value == None or d[filter_key] == filter_value) ]
+        other_list = list(kwargs['extend_with']) if 'extend_with' in kwargs else []
+        data = [dict(d) for d in list(self + other_list) if (filter_key == None or filter_key in d.keys()) and (filter_value == None or d[filter_key] == filter_value) ]
         schema = schema if schema is not None else self.schema
         schema_add_missing = schema_add_missing if schema_add_missing is not None else self.schema_add_missing
         schema_constrain_to_existing = schema_constrain_to_existing if schema_constrain_to_existing is not None else self.schema_constrain_to_existing
         metadata = metadata if metadata is not None else self.metadata
         immutable = immutable if immutable is not None else self.immutable
         append_only = append_only if append_only is not None else self.append_only
+        reject_dups = reject_dups if reject_dups is not None else self.reject_dups
         
         return listofdicts( copy.deepcopy(data), 
                           schema=copy.deepcopy(self.schema), 
@@ -494,7 +633,8 @@ class listofdicts(List[Dict[str, Any]]):
                           schema_constrain_to_existing=schema_constrain_to_existing,
                           metadata=copy.deepcopy(self.metadata),
                           immutable=immutable,
-                          append_only=append_only
+                          append_only=append_only,
+                          reject_dups=reject_dups
                           )
     
 
@@ -504,17 +644,20 @@ class listofdicts(List[Dict[str, Any]]):
         """
         return self.copy(immutable=False, append_only=False)
 
+
     def as_immutable(self) -> 'listofdicts':
         """
         Returns an immutable deepcopy of this listofdicts instance.
         """
         return self.copy(immutable=True)
 
+
     def as_append_only(self) -> 'listofdicts':
         """
         Returns an append_only deepcopy of this listofdicts instance.
         """
         return self.copy(append_only=True)
+
 
     def update_item(self, index: int, updates: Dict[str, Any]):
         """
@@ -532,13 +675,16 @@ class listofdicts(List[Dict[str, Any]]):
         original = self.validate_item(original)
         super().__setitem__(index, original)
 
+
     def __repr__(self):
         return f"listofdicts( immutable={self.immutable}, append_only={self.append_only}, schema={self.schema}, \n{list(self)})"
 
+
     def __eq__(self, other):
-        if not isinstance(other, listofdicts):
+        if not isinstance(other, list):
             return False
         return list(self) == list(other) and self.immutable == other.immutable and self.schema == other.schema
+
 
     def __hash__(self):
         if not self.immutable:
@@ -547,7 +693,6 @@ class listofdicts(List[Dict[str, Any]]):
             tuple(frozenset(item.items()) for item in self),
             frozenset(self.schema.items()) if self.schema else None
         ))
-
 
 
     def to_json(self, *, indent: Optional[int] = None, preserve_metadata: bool = False) -> str:
@@ -569,6 +714,7 @@ class listofdicts(List[Dict[str, Any]]):
             return json.dumps({"metadata": self.metadata, "data": list(self), "settings": settings}, indent=indent)
 
         return json.dumps(list(self), indent=indent)
+
 
     @classmethod
     def from_json(cls, json_str: str, *, 
@@ -646,6 +792,14 @@ class listofdicts(List[Dict[str, Any]]):
         for prompt in user_prompts: newobj.append({'role': 'user', 'content': prompt})
         
         return newobj
+
+
+    @classmethod  # for pydantic support
+    def _validate(cls, value):
+        # Convert value into a listofdicts instance
+        if isinstance(value, cls): return value
+        if isinstance(value, dict): return cls([value])   
+        return cls(value)
 
 
 
