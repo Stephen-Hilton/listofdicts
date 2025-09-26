@@ -1,4 +1,5 @@
 import copy, json, datetime, warnings
+from collections import Counter
 from typing import List, Dict, Any, Iterable, Optional, Type
 from enum import StrEnum
 from pydantic_core import core_schema
@@ -570,6 +571,42 @@ class listofdicts(List[Dict[str, Any]]):
         return self.filter()
 
 
+
+    def lowify (self, keys:bool = True, values:bool = False, include_only_keys:list=[]):
+        """
+        Converts the keys, values, or both to lower case (where strings) for all dictionaries 
+        in the list. By default, will convert keys and not values.  Also allows for the inclusion
+        of an explicit list of keys (and associated values, if values = True) to make lower.  
+        If the lower() operation would produce a duplicate key (e.g., "id" and "ID") lowify() will 
+        not lower() the offending key (e.g., for "id" and "ID", the second would be left unchanged, 
+        whereas for "ID" and "id" the first would be left unchanged).
+        This will also fail if the list is immutable or append_only.
+        """
+        self._check_mutable()
+        if not keys and not values: return self 
+        for idx, row in enumerate([r for r in self]):
+
+            # get all keys in the row
+            keynames = {k:k.lower() if keys and isinstance(k, str) and (k in include_only_keys or not include_only_keys) else k  for k in row.keys() }
+            rowvals = [v.lower() if values and isinstance(v,str) and (k in include_only_keys or not include_only_keys) else v  for k,v in row.items()]
+
+            if keys:
+                keydups = {k:v for k,v in dict(Counter(keynames.values())).items() if v >1}
+                if keydups:
+                    # no pre-existing lowercase key, then skip resetting the first key (allow one all-lowercase if possible)
+                    skip_first = not any([v for k,v in keynames.items() if k==v and k in keydups ])  
+
+                    # set all dups back to original values:
+                    for old, new in {k:v for k,v in keynames.items() if v in keydups }.items():
+                        if skip_first: skip_first = False
+                        else: keynames[old] = old 
+                
+            self[idx] = dict(zip(keynames.values(), rowvals))
+ 
+        return self
+ 
+
+
     def uniquify(self, list_to_uniquify: Optional[list] = None):
         """
         Removes duplicate dicts (all keys/values) from the list (regardless of dict key order).
@@ -683,7 +720,10 @@ class listofdicts(List[Dict[str, Any]]):
     def __eq__(self, other):
         if not isinstance(other, list):
             return False
-        return list(self) == list(other) and self.immutable == other.immutable and self.schema == other.schema
+        if isinstance(other, listofdicts):
+            if self.immutable != other.immutable or self.schema != other.schema or self.metadata != other.metadata:
+                return False
+        return list(self) == list(other) 
 
 
     def __hash__(self):
