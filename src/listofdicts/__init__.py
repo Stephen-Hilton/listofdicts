@@ -1,3 +1,11 @@
-from .listofdicts import listofdicts
+"""ListOfDicts package entrypoint.
 
-__all__ = ['listofdicts']
+This module re-exports the main class so consumers can import as:
+
+```py
+from listofdicts import ListOfDicts
+```
+"""
+from .listofdicts import ListOfDicts
+
+__all__ = ["ListOfDicts"]
