@@ -167,7 +167,7 @@ print(json_string)
 # }
 
 # Deserialize from JSON
-loaded = ListOfDicts.from_json(json_string)
+loaded = ListOfDicts().from_json(json_string)
 print(isinstance(loaded[0]['created'], datetime))  # Output: True
 print(loaded.metadata)  # Output: {'version': '1.0', 'author': 'Alice'}
 ```
@@ -333,18 +333,16 @@ json_str = lod.to_json()
 
 #### `from_json(json_content, metadata_to_props=[])`
 
-Create a ListOfDicts from JSON string.
+Load ListOfDicts from a JSON string. This is an instance method (not class method), and will replace all existing instance data and metadata.
 
 ```python
-lod = ListOfDicts.from_json(json_str)
-lod = ListOfDicts.from_json(json_str, metadata_to_props=['version'])
+lod = ListOfDicts().from_json(json_str)
 ```
 
 **Parameters:**
-- `json_content`: JSON string with 'data' and optional 'metadata' keys
-- `metadata_to_props`: List of metadata keys to set as instance attributes
+- `json_content`: JSON string in the format `{"data":[...], "metadata":{...} }` (both `data` and `metadata` keys optional)
 
-**Returns:** New ListOfDicts with deserialized data
+**Returns:** ListOfDicts with deserialized data
 
 #### `clear()`
 
@@ -460,7 +458,7 @@ assert newlod.metadata == {}
 ```
 The `lod[:]` command creates a new data object, but doesn't contain the metadata (or any other class variable), so it's not carried over.
 
-Metadata is the only class variable that is included in the `.to_json()` method and `.from_json()` class method.  This does allow you to serialize / deserialize using JSON, and persist metadata.
+Metadata is the only class variable that is included in the `.to_json()` and `.from_json()`  methods.  This does allow you to serialize / deserialize using JSON, and persist metadata.
 
 ```python
 lod = ListOfDicts({'data': 'value'})
@@ -475,7 +473,7 @@ print(lod.metadata['version'])
 
 # Persist with metadata
 json_str = lod.to_json()
-restored = ListOfDicts.from_json(json_str)
+restored = ListOfDicts().from_json(json_str)
 print(restored.metadata)
 ```
 

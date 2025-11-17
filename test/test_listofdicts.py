@@ -83,16 +83,10 @@ def test_to_json_and_from_json():
 
     # create a JSON payload that includes a date string and ensure from_json parses it
     payload = json.dumps({'metadata': {'k': 'v'}, 'data': [{'d': '2022-01-02T03:04:05'}]})
-    newlod = ListOfDicts.from_json(payload)
+    newlod = ListOfDicts().from_json(payload)
     # make_datatypes_pyobj should have converted the date string to datetime
     assert isinstance(newlod[0]['d'], datetime)
 
-
-def test_from_json_with_metadata_to_props():
-    payload = json.dumps({'metadata': {'x': 42, 'y': 'foo'}, 'data': []})
-    newlod = ListOfDicts.from_json(payload, metadata_to_props=['x'])
-    assert hasattr(newlod, 'x')
-    assert newlod.x == 42
 
 
 def test_addkey_if_missing():

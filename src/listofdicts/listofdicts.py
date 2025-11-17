@@ -100,31 +100,21 @@ class ListOfDicts(list):
         if inplace: self.clear(); self.extend(rtn); return self
         return rtn
 
+
     def to_json(self) -> str:
         """Convert instance to JSON string"""
         rtn = { 'metadata': self.metadata, 'data': self.make_datatypes_dbsafe() }
         return json.dumps(rtn, default=str, indent=2)
 
 
-    @classmethod
-    def from_json(cls, json_content: str, metadata_to_props:list = []):
-        """Create instance from JSON string content. Optionally preload instance.properties with provided metadata values, if exist."""
+    def from_json(self, json_content: str) -> "ListOfDicts":
+        """Load data from JSON string content, including metadata if included. This replaces any existing data."""
         jsondoc = json.loads(json_content)
-        newcls = cls(jsondoc.get('data', {}))
-        newcls.metadata = jsondoc.get('metadata', {})
-
-        # add values from metadata to the object attributes/properties (where exist)
-        # metadata_to_props is expected to be a list of metadata keys to copy
-        for key in metadata_to_props:
-            if key in newcls.metadata:
-                setattr(newcls, key, newcls.metadata[key])
-
-        rtn = newcls.make_datatypes_pyobj()
-        # ensure copied metadata props survive conversion (returned object may be a new instance)
-        for key in metadata_to_props:
-            if key in newcls.metadata:
-                setattr(rtn, key, newcls.metadata[key])
-        return rtn
+        self.metadata = {**jsondoc.get('metadata', {})}
+        self.clear()
+        self.extend(jsondoc.get('data', []))
+        self.make_datatypes_pyobj(inplace=True)
+        return self
 
 
     def addkey_if_missing(self, keys:list, value_if_missing=None) -> "ListOfDicts":
