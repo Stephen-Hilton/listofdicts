@@ -13,7 +13,17 @@ def test_import():
     import listofdicts
     assert hasattr(listofdicts, 'ListOfDicts')
  
- 
+def test_initialization_with_data():
+    testdata = [{'a': 1, 'b': 2}, {'a': 3, 'b': 4}]
+    testmeta = {'source': 'unit_test', 'version': 1.0}
+    lod1 = ListOfDicts(*testdata, metadata=testmeta)
+    lod2 = ListOfDicts({'a': 1, 'b': 2}, {'a': 3, 'b': 4}, metadata={'source': 'unit_test', 'version': 1.0})
+    assert lod1 == lod2
+    lod3 = ListOfDicts(testdata).udpate_metadata(**testmeta)
+    lod4 = ListOfDicts({'a': 1, 'b': 2}, {'a': 3, 'b': 4}).udpate_metadata(source='unit_test', version=1.0)
+    assert lod3 == lod4
+    assert lod1 == lod2 == lod3 == lod4
+
 def test_append_and_active_sync():
     lod = ListOfDicts()
     lod.append({'a': 1, 'b': 2})

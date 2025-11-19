@@ -5,9 +5,11 @@ from datetime import datetime
 class ListOfDicts(list):
     metadata = {}
 
-    def __init__(self, *args):
+    def __init__(self, *args, metadata:dict = {}):
         super().__init__()
         self._active_index = 0
+        if not isinstance(metadata, dict): raise TypeError("metadata must be a dict")
+        self.metadata = metadata 
         self._syncing = False
         self._synced_keys = set()  # Track keys synced from dict
         
@@ -65,6 +67,14 @@ class ListOfDicts(list):
         super().extend(items)
         self._sync_from_dict()
 
+
+    def udpate_metadata(self, **kwargs) -> "ListOfDicts":
+        """
+        Append a list of key/value pairs to the metadata dictionary, and return the instance.
+        """
+        self.metadata.update(kwargs)
+        return self
+    
 
     def make_datatypes_dbsafe(self, inplace:bool = False) -> "ListOfDicts":
         """
