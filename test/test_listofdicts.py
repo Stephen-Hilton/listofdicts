@@ -13,6 +13,20 @@ def test_import():
     import listofdicts
     assert hasattr(listofdicts, 'ListOfDicts')
  
+def test_from_json_with_single_dict():
+    normal_data = json.dumps({"data": [{'a': 1, 'b': 2}, {'c': 3, 'd': 4}]})
+    dict_data = json.dumps({'a':11, 'b':12})
+    list_data = json.dumps([{'a':21, 'b':22}, {'c':23, 'd':24}])
+
+    for i, tst in enumerate([normal_data, dict_data, list_data]):
+        lod = ListOfDicts().from_json(tst)
+        assert isinstance(lod, ListOfDicts)
+        assert 'a' in lod[0]
+        assert lod.a - (i*10) == 1
+        assert lod.b - (i*10) == 2
+
+ 
+
 def test_initialization_with_data():
     testdata = [{'a': 1, 'b': 2}, {'a': 3, 'b': 4}]
     testmeta = {'source': 'unit_test', 'version': 1.0}

@@ -120,9 +120,20 @@ class ListOfDicts(list):
     def from_json(self, json_content: str) -> "ListOfDicts":
         """Load data from JSON string content, including metadata if included. This replaces any existing data."""
         jsondoc = json.loads(json_content)
-        self.metadata = {**jsondoc.get('metadata', {})}
         self.clear()
-        self.extend(jsondoc.get('data', []))
+
+        # allow for some variability in the input format
+        try:
+            if 'data' in jsondoc and isinstance(jsondoc['data'], list):
+                self.extend(jsondoc['data'])
+                self.metadata = {**jsondoc.get('metadata', {})}
+            elif isinstance(jsondoc, list):
+                self.extend(jsondoc)
+            elif isinstance(jsondoc, dict):
+                self.extend([jsondoc])
+        except Exception:
+            raise ValueError(f"Invalid JSON content for ListOfDicts: \n{json_content}")
+        
         self.make_datatypes_pyobj(inplace=True)
         return self
 
