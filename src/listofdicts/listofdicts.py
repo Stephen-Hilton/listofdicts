@@ -42,7 +42,22 @@ class ListOfDicts(list):
         self._sync_from_dict()
     
 
+    @property
+    def active_row(self):
+        if len(self) == 0 or self._active_index is None: return None
+        return self[self._active_index]
+
+
+    def callback_on_change(self, func):
+        """
+        Register a callback function to be called whenever the active dict is changed.
+        The function should accept two parameters: key and value.
+        """
+        self._callback_func = func
+
+
     def append(self, item):
+        """add the given dict to the end of the list"""
         if not isinstance(item, dict):
             raise TypeError("All elements must be of type dict")
         super().append(item)
@@ -52,6 +67,7 @@ class ListOfDicts(list):
     
 
     def insert(self, index, item):
+        """insert the given dict at the specified index"""
         if not isinstance(item, dict):
             raise TypeError("All elements must be of type dict")
         super().insert(index, item)
@@ -61,6 +77,7 @@ class ListOfDicts(list):
     
 
     def extend(self, items):
+        """extend the list by appending elements from the iterable to the end of the list (in place)"""
         for item in items:
             if not isinstance(item, dict):
                 raise TypeError("All elements must be of type dict")
@@ -70,7 +87,7 @@ class ListOfDicts(list):
 
     def udpate_metadata(self, **kwargs) -> "ListOfDicts":
         """
-        Append a list of key/value pairs to the metadata dictionary, and return the instance.
+        Append key/value pairs to the metadata dictionary, and return the LoD instance.
         """
         self.metadata.update(kwargs)
         return self
@@ -90,7 +107,6 @@ class ListOfDicts(list):
         if inplace: self.clear(); self.extend(rtn); return self
         return rtn
         
-
 
     def make_datatypes_pyobj(self, inplace:bool = False) -> "ListOfDicts":
         """
@@ -170,6 +186,8 @@ class ListOfDicts(list):
                     self._synced_keys.add(key)
         finally:
             self._syncing = False
+            if hasattr(self, '_callback_func') and self._callback_func is not None: 
+                self._callback_func( self )
     
 
     def _sync_to_dict(self, key, value):
@@ -204,12 +222,14 @@ class ListOfDicts(list):
     
 
     def clear(self):
+        """Remove all items from the list and reset the active index (does not change metadata)."""
         super().clear()
         self._active_index = None
         self._sync_from_dict()
     
 
     def pop(self, index=-1):
+        """Remove and return item at index (default last), and adjust active index."""
         result = super().pop(index)
         if len(self) == 0:
             self._active_index = None

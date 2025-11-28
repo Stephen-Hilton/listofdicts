@@ -5,7 +5,9 @@ A Python list subclass that provides convenient attribute-based access to dictio
 ## Features
 
 - **Attribute-based access**: Access active dictionary keys as object attributes
-- **Active index tracking**: Track and switch between items in the list
+- **Active index tracking**: Track and switch between items in the list with `active_index` property
+- **Active row access**: Get the current active dictionary directly with the `active_row` property
+- **Callback functions**: Register callbacks to react to active index changes
 - **Automatic syncing**: Changes to attributes sync to the active dictionary
 - **Type validation**: All list items must be dictionaries
 - **JSON serialization**: Serialize to/from JSON with metadata support
@@ -119,6 +121,129 @@ print(lod[2]['y'])  # Output: 999
 lod.z = 42
 print(lod[2]['z'])  # Output: 42
 print('z' in lod[2])  # Output: True
+```
+
+### Active Row Property
+
+The `active_row` property provides convenient access to the currently active dictionary:
+
+```python
+lod = ListOfDicts(
+    {'id': 1, 'name': 'Alice'},
+    {'id': 2, 'name': 'Bob'},
+    {'id': 3, 'name': 'Charlie'}
+)
+
+# Access the active row directly
+print(lod.active_row)  # Output: {'id': 1, 'name': 'Alice'}
+
+# Switch active index and get the new row
+lod.active_index = 1
+print(lod.active_row)  # Output: {'id': 2, 'name': 'Bob'}
+
+# Empty list returns None
+lod.clear()
+print(lod.active_row)  # Output: None
+
+# Useful for quick access to active dict data
+lod = ListOfDicts({'a': 1, 'b': 2}, {'a': 10, 'b': 20})
+lod.active_index = 0
+print(lod.active_row['a'], lod.active_row['b'])  # Output: 1 2
+
+# active_row is a dict object (not a ListOfDicts) but provides
+# an alternate way to get to currently active data:
+print(lod.active_row['a'] == lod.a) # True
+print(lod.active_row['b'] == lod.b) # True
+lod.c = 3  # add to the data
+print(lod.active_row['c'] == lod.c) # True
+```
+
+### Callback Functions
+
+Register a callback function to be invoked whenever the active index changes. This is useful for reactive programming, logging, or triggering side effects:
+
+```python
+lod = ListOfDicts(
+    {'id': 1, 'status': 'not_started'},
+    {'id': 2, 'status': 'pending'},
+    {'id': 3, 'status': 'complete'}
+)
+
+# Define a callback function (receives the ListOfDicts instance)
+def log_active_change(lod_instance):
+    print(f" Active index changed to {lod_instance.active_index}")
+    print(f" Active row: {lod_instance.active_row}")
+
+# Register the callback
+lod.callback_on_change(log_active_change)
+
+# Change active index - callback is invoked
+lod.active_index = 0  
+# Output: 
+#  Active index changed to 0
+#  Active row: {'id': 1, 'status': 'not_started'}
+
+lod.active_index = 1  
+# Output: 
+#  Active index changed to 1
+#  Active row: {'id': 2, 'status': 'pending'}
+
+lod.active_index = 2  
+# Output: 
+#  Active index changed to 2
+#  Active row: {'id': 3, 'status': 'complete'}
+```
+
+**Advanced Example: Reactive Updates**
+
+```python
+lod = ListOfDicts(
+    {'value': 10},
+    {'value': 20},
+    {'value': 30}
+)
+
+result = None
+
+def square_active_value(lod_instance):
+    global result
+    result = lod_instance.active_row['value'] ** 2
+
+lod.callback_on_change(square_active_value)
+
+lod.active_index = 0
+print(result)  # Output: 100
+
+lod.active_index = 1
+print(result)  # Output: 400
+
+lod.active_index = 2
+print(result)  # Output: 900
+
+lod.active_index = 1
+print(result)  # Output: 400
+
+lod.active_index = 0
+print(result)  # Output: 100
+```
+
+**Example: Enforcing Active Index Constraints**
+
+```python
+lod = ListOfDicts({'x': 1}, {'x': 2}, {'x': 3}, {'x': 4}, {'x': 5})
+
+def always_stay_on_index_2(lod_instance):
+    # Important: Check before reassigning to avoid infinite loops
+    if lod_instance.active_index != 2:
+        lod_instance.active_index = 2
+
+lod.callback_on_change(always_stay_on_index_2)
+
+lod.active_index = 0  # Callback enforces active_index = 2
+print(lod.active_index)  # Output: 2
+
+lod.active_index = 4  # Callback enforces active_index = 2
+print(lod.active_index)  # Output: 2
 ```
 
 ### Managing Keys
@@ -256,6 +381,38 @@ idx = lod.active_index  # Get current active index
 - Negative indices wrap (e.g., `-1` is the last item)
 - Returns `None` if the list is empty
 
+#### `active_row`
+
+Get the currently active dictionary without needing to use indexing.
+
+```python
+current_dict = lod.active_row  # Returns self[active_index]
+lod.active_index = 1
+next_dict = lod.active_row  # Returns self[1]
+```
+
+**Returns:** The dictionary at `active_index`, or `None` if the list is empty
+
+#### `callback_on_change(func)`
+
+Register a callback function to be invoked whenever `active_index` changes.
+
+```python
+def my_callback(lod_instance):
+    print(f"Active index: {lod_instance.active_index}")
+    
+lod.callback_on_change(my_callback)
+lod.active_index = 1  # Invokes callback
+```
+
+**Parameters:**
+- `func`: A callable that accepts one parameter (the ListOfDicts instance)
+
+**Notes:**
+- The callback is called after `active_index` is set and synchronization occurs
+- Callbacks can modify the ListOfDicts instance (e.g., enforce index constraints)
+- To avoid infinite loops, always check the condition before modifying `active_index` within a callback
+
 ### Methods
 
 #### `append(item)`
@@ -264,6 +421,16 @@ Add a dictionary to the end of the list. First item added sets `active_index` to
 
 ```python
 lod.append({'key': 'value'})
+```
+
+**Raises:** `TypeError` if item is not a dict
+
+#### `insert(index, item)`
+
+Insert a dictionary at the given index. Adjusts `active_index` if needed.
+
+```python
+lod.insert(0, {'key': 'value'})
 ```
 
 **Raises:** `TypeError` if item is not a dict

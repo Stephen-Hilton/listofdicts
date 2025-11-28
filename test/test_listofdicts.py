@@ -13,6 +13,7 @@ def test_import():
     import listofdicts
     assert hasattr(listofdicts, 'ListOfDicts')
  
+ 
 def test_from_json_with_single_dict():
     normal_data = json.dumps({"data": [{'a': 1, 'b': 2}, {'c': 3, 'd': 4}]})
     dict_data = json.dumps({'a':11, 'b':12})
@@ -25,7 +26,6 @@ def test_from_json_with_single_dict():
         assert lod.a - (i*10) == 1
         assert lod.b - (i*10) == 2
 
- 
 
 def test_initialization_with_data():
     testdata = [{'a': 1, 'b': 2}, {'a': 3, 'b': 4}]
@@ -37,6 +37,64 @@ def test_initialization_with_data():
     lod4 = ListOfDicts({'a': 1, 'b': 2}, {'a': 3, 'b': 4}).udpate_metadata(source='unit_test', version=1.0)
     assert lod3 == lod4
     assert lod1 == lod2 == lod3 == lod4
+
+
+def test_callback_on_sync():
+    squared_active_index = None
+
+    def square_active_index(lod_instance):
+        nonlocal squared_active_index
+        squared_active_index = lod_instance.active_index **2
+
+    lod = ListOfDicts({'a': 1, 'b': 2},
+                      {'a': 3, 'b': 4}, 
+                      {'a': 5, 'b': 6},
+                      {'a': 7, 'b': 8},
+                      {'a': 9, 'b': 10})
+    lod.callback_on_change( square_active_index )
+    lod.active_index = 0
+    assert squared_active_index == 0
+    lod.active_index = 1
+    assert squared_active_index == 1
+    lod.active_index = 2
+    assert squared_active_index == 4
+    lod.active_index = 3
+    assert squared_active_index == 9
+    lod.active_index = 4
+    assert squared_active_index == 16
+
+    def always_stay_on_index_3(lod_instance):
+        if lod_instance.active_index != 3: # this is important to avoid infinite loop
+            lod_instance.active_index = 3   
+
+    lod.callback_on_change( always_stay_on_index_3 )
+    lod.active_index = 0
+    assert lod.active_index == 3
+    lod.active_index = 1
+    assert lod.active_index == 3
+    lod.active_index = 2
+    assert lod.active_index == 3
+    lod.active_index = 4
+    assert lod.active_index == 3
+
+
+def test_active_index_and_active_row():
+    lod = ListOfDicts({'a': 1}, {'a': 2}, {'a': 3})
+    assert lod.active_index == 0
+    assert lod.active_row == {'a': 1}
+
+    lod.active_index = 1
+    assert lod.active_index == 1
+    assert lod.active_row == {'a': 2}
+
+    lod.active_index = 2
+    assert lod.active_index == 2
+    assert lod.active_row == {'a': 3}
+
+    lod.clear()
+    assert lod.active_index is None
+    assert lod.active_row is None
+
 
 def test_append_and_active_sync():
     lod = ListOfDicts()
@@ -375,3 +433,14 @@ def test_example_usage():
     assert lod.c == 3
     assert hasattr(lod, 'a') == False   # index 0 does not have 'a'
 
+
+def test_from_json_invalid_raises_valueerror():
+    """Test that invalid JSON content (e.g., non-dict elements) raises ValueError with helpful message."""
+    import pytest
+    lod = ListOfDicts({'a': 1})
+    
+    # Test with JSON that has a list of non-dict items (which will fail extend)
+    with pytest.raises(ValueError, match="Invalid JSON content"):
+        lod.from_json('[1, 2, 3]')  # integers are not dicts, will fail
+
+pass
