@@ -169,6 +169,7 @@ class ListOfDicts(list):
         if self._syncing: return
         
         self._syncing = True
+        active_dict = {}
         try:
             # Remove old synced properties (only those that were synced from dict)
             for key in list(self._synced_keys):
@@ -185,7 +186,7 @@ class ListOfDicts(list):
                     self._synced_keys.add(key)
         finally:
             self._syncing = False
-            if hasattr(self, '_callback_func') and callable(self._callback_func): 
+            if hasattr(self, '_callback_func') and callable(self._callback_func) and active_dict: 
                 self._callback_func( self, active_dict )
     
 

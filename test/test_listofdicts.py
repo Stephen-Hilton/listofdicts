@@ -121,6 +121,56 @@ def test_callback_on_sync():
     lod.a = 0
     assert lod.a == 0
 
+    # you can also "disable" the callback for loads:
+    def my_fancy_callback(self, change_dict):
+        nonlocal _loading 
+        if _loading: return # skip if loading
+
+        if 'c' in change_dict: return # avoid infinite recursion 
+        self.c = self.a + self.b
+    _loading = False
+
+    # new lod object:
+    lod = ListOfDicts({'a': 1, 'b': 2},
+                      {'a': 3, 'b': 4}, 
+                      {'a': 5, 'b': 6},
+                      {'a': 7, 'b': 8},
+                      {'a': 9, 'b': 10})
+    lod.callback_on_change(my_fancy_callback)
+    lod.a = 1
+    assert lod.c == 3  # 1 + 2
+    lod.a = 2
+    assert lod.c == 4  # 2 + 2
+    
+    _loading = True  # simulate loading
+    lod.a = 3
+    assert lod.c == 4   # should not change, callback disabled
+    _loading = False  # re-enable callback
+    lod.c = 5  # manually set c, since callback was disabled
+    assert lod.c == 5  # should now be 3 + 2
+    lod.c = 4  # reset c to 4 (allowed in callback)
+    lod.a = lod.a # or, you can trigger the callback by setting a to itself
+    assert lod.c == 5  # should now be 3 + 2
+    lod.a = 4
+    assert lod.c == 6  # 4 + 2
+
+    # this can be important, as set-level changes will also trigger the callback:
+    lod.append({'a': 11, 'b': 12})
+    lod.active_index = -1 # last, aka what we just added
+    assert lod.c == 23  # 11 + 12
+
+    # you may not want to trigger for every change:
+    _loading = True
+    for r in lod: r['a'] = 5
+    _loading = False
+    assert lod.a == 5
+    assert lod.b == 12
+    assert lod.c == 23 # update was skipped, so this is incorrect 
+    lod.a = 6 
+    assert lod.c == 18 # updated on next change
+
+
+
 
 def test_active_index_and_active_row():
     lod = ListOfDicts({'a': 1}, {'a': 2}, {'a': 3})
