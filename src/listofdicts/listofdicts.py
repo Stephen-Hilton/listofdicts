@@ -166,8 +166,7 @@ class ListOfDicts(list):
 
 
     def _sync_from_dict(self):
-        if self._syncing:
-            return
+        if self._syncing: return
         
         self._syncing = True
         try:
@@ -186,23 +185,21 @@ class ListOfDicts(list):
                     self._synced_keys.add(key)
         finally:
             self._syncing = False
-            if hasattr(self, '_callback_func') and self._callback_func is not None: 
-                self._callback_func( self )
+            if hasattr(self, '_callback_func') and callable(self._callback_func): 
+                self._callback_func( self, active_dict )
     
 
     def _sync_to_dict(self, key, value):
-        if self._syncing or len(self) == 0:
-            return
-        
-        # Don't sync class-level attributes to the dict
-        if key in self._class_attrs:
-            return
+        if self._syncing or len(self) == 0: return
+        if key in self._class_attrs: return # Don't sync class-level attributes to the dict
         
         self._syncing = True
         try:
             self[self._active_index][key] = value
         finally:
             self._syncing = False
+            if hasattr(self, '_callback_func') and callable(self._callback_func): 
+                self._callback_func( self, {key:value} )
     
 
     def __setitem__(self, index, item):

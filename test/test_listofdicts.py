@@ -40,32 +40,57 @@ def test_initialization_with_data():
 
 
 def test_callback_on_sync():
-    squared_active_index = None
-
-    def square_active_index(lod_instance):
-        nonlocal squared_active_index
-        squared_active_index = lod_instance.active_index **2
 
     lod = ListOfDicts({'a': 1, 'b': 2},
                       {'a': 3, 'b': 4}, 
                       {'a': 5, 'b': 6},
                       {'a': 7, 'b': 8},
                       {'a': 9, 'b': 10})
+    
+    # call back called when "active" data changed:
+    square_value = None
+
+    def print_changed_data(self, change_dict):
+        print(f"data changed: {change_dict}, full data: {dict(self[self.active_index])}")
+        nonlocal square_value
+        square_value = change_dict['a'] **2
+
+    lod.callback_on_change( print_changed_data )
+    lod.a = 1
+    assert square_value == 1
+    lod.a = 2
+    assert square_value == 4
+    lod.a = 3
+    assert square_value == 9
+
+    # or via lambda: 
+    lod.callback_on_change( lambda self, change_dict: print(f"Lambda callback: data changed: {change_dict}") )
+    lod.a = 3
+    lod.a = 2
+    lod.a = 1
+
+
+    # "self" is the ListOfDicts instance, so we can access non-data elements, like active_index"
+    def square_active_index(self, change_dict):
+        nonlocal square_value
+        square_value = self.active_index **2
+
     lod.callback_on_change( square_active_index )
     lod.active_index = 0
-    assert squared_active_index == 0
+    assert square_value == 0
     lod.active_index = 1
-    assert squared_active_index == 1
+    assert square_value == 1
     lod.active_index = 2
-    assert squared_active_index == 4
+    assert square_value == 4
     lod.active_index = 3
-    assert squared_active_index == 9
+    assert square_value == 9
     lod.active_index = 4
-    assert squared_active_index == 16
+    assert square_value == 16
 
-    def always_stay_on_index_3(lod_instance):
-        if lod_instance.active_index != 3: # this is important to avoid infinite loop
-            lod_instance.active_index = 3   
+    # accessing the ListOfDicts instance means you can enforce rules
+    def always_stay_on_index_3(self, change_dict):
+        if self.active_index != 3: # this is important to avoid infinite loop
+            self.active_index = 3   
 
     lod.callback_on_change( always_stay_on_index_3 )
     lod.active_index = 0
@@ -76,6 +101,25 @@ def test_callback_on_sync():
     assert lod.active_index == 3
     lod.active_index = 4
     assert lod.active_index == 3
+
+    # or, validate data types:
+    def must_be_positive_a(self, change_dict):
+        nonlocal prev_a
+        if 'a' in change_dict and change_dict['a'] < 0:  self.a = prev_a
+        else:   prev_a = change_dict['a']
+    prev_a = None
+
+    lod.callback_on_change( must_be_positive_a )
+    lod.a = 5
+    assert lod.a == 5
+    lod.a = -10
+    assert lod.a == 5  # should have reverted
+    lod.a = 3
+    assert lod.a == 3
+    lod.a = -1
+    assert lod.a == 3  # should have reverted
+    lod.a = 0
+    assert lod.a == 0
 
 
 def test_active_index_and_active_row():
