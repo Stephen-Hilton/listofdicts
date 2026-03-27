@@ -70,10 +70,19 @@ def test_callback_on_sync():
     lod.a = 1
 
 
-    # "self" is the ListOfDicts instance, so we can access non-data elements, like active_index"
+    # changing active_index counts as an update:: 
+    lod.callback_on_change( lambda self, change_dict: print(f"Lambda callback: index changed: {self.active_index}") )
+    lod.active_index = 0
+    lod.active_index = 1
+    lod.active_index = 2
+    lod.active_index = 3
+
+
+    # "self" is the ListOfDicts instance, allowing access to non-data elements, like active_index"
     def square_active_index(self, change_dict):
         nonlocal square_value
         square_value = self.active_index **2
+        print('event_fired!')
 
     lod.callback_on_change( square_active_index )
     lod.active_index = 0
@@ -170,7 +179,7 @@ def test_callback_on_sync():
     assert lod.c == 18 # updated on next change
 
 
-
+test_callback_on_sync()
 
 def test_active_index_and_active_row():
     lod = ListOfDicts({'a': 1}, {'a': 2}, {'a': 3})
